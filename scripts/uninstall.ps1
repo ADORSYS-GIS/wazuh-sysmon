@@ -56,8 +56,18 @@ function Uninstall-SysmonService {
     if (Test-Path $global:Config.SysmonExePath) {
         InfoMessage "Uninstalling Sysmon using installed executable..."
         try {
-            Start-Process -FilePath $global:Config.SysmonExePath -ArgumentList "-u" -Wait -NoNewWindow
-            InfoMessage "Sysmon uninstalled successfully!"
+            $process = Start-Process -FilePath $global:Config.SysmonExePath `
+             -ArgumentList "-u" `
+             -Wait `
+             -NoNewWindow `
+             -RedirectStandardOutput "$env:TEMP\sysmon_install.log" `
+             -RedirectStandardError "$env:TEMP\sysmon_install_error.log" `
+             -PassThru
+            if ($process.ExitCode -eq 0) {
+                InfoMessage "Sysmon uninstalled successfully!"
+            } else {
+                InfoMessage "Sysmon uninstallation returned exit code: $($process.ExitCode). This might be expected if Sysmon wasn't installed."
+            }
         } catch {
             ErrorMessage "Failed to uninstall Sysmon using installed executable: $_"
         }
@@ -65,12 +75,28 @@ function Uninstall-SysmonService {
         # Try to uninstall using sysmon from PATH
         InfoMessage "Sysmon executable not found in installation path. Trying to uninstall using sysmon from PATH..."
         try {
-            Start-Process -FilePath "sysmon64.exe" -ArgumentList "-u" -Wait -NoNewWindow
-            InfoMessage "Sysmon uninstalled successfully!"
+            $process = Start-Process -FilePath "sysmon64.exe" `
+             -ArgumentList "-u" `
+             -Wait `
+             -NoNewWindow `
+             -PassThru
+            if ($process.ExitCode -eq 0) {
+                InfoMessage "Sysmon uninstalled successfully!"
+            } else {
+                InfoMessage "Sysmon uninstallation returned exit code: $($process.ExitCode). This might be expected if Sysmon wasn't installed."
+            }
         } catch {
             try {
-                Start-Process -FilePath "sysmon.exe" -ArgumentList "-u" -Wait -NoNewWindow
-                InfoMessage "Sysmon uninstalled successfully!"
+                $process = Start-Process -FilePath "sysmon.exe" `
+                 -ArgumentList "-u" `
+                 -Wait `
+                 -NoNewWindow `
+                 -PassThru
+                if ($process.ExitCode -eq 0) {
+                    InfoMessage "Sysmon uninstalled successfully!"
+                } else {
+                    InfoMessage "Sysmon uninstallation returned exit code: $($process.ExitCode). This might be expected if Sysmon wasn't installed."
+                }
             } catch {
                 WarnMessage "Failed to uninstall Sysmon. This might be expected if Sysmon wasn't installed or was already uninstalled."
             }
@@ -84,10 +110,17 @@ function Remove-SysmonInstallation {
     
     if (Test-Path $global:Config.SysmonInstallPath) {
         try {
-            Remove-Item -Path $global:Config.SysmonInstallPath -Recurse -Force
-            InfoMessage "Removed Sysmon installation directory: $($global:Config.SysmonInstallPath)"
+            # Check if the directory is accessible
+            $acl = Get-Acl -Path $global:Config.SysmonInstallPath -ErrorAction SilentlyContinue
+            if ($acl) {
+                Remove-Item -Path $global:Config.SysmonInstallPath -Recurse -Force
+                InfoMessage "Removed Sysmon installation directory: $($global:Config.SysmonInstallPath)"
+            } else {
+                WarnMessage "Cannot access Sysmon installation directory. It might be in use or protected."
+            }
         } catch {
             ErrorMessage "Failed to remove Sysmon installation directory: $_"
+            WarnMessage "You may need to manually remove the directory: $($global:Config.SysmonInstallPath)"
         }
     } else {
         WarnMessage "Sysmon installation directory not found: $($global:Config.SysmonInstallPath)"
@@ -99,40 +132,29 @@ function Remove-WazuhSysmonConfig {
     PrintStep 3 "Removing Sysmon configuration from Wazuh"
     
     if (Test-Path $global:Config.WazuhConfigPath) {
-        # Read the current config
-        $configContent = Get-Content $global:Config.WazuhConfigPath -Raw
-        
-        # Check if Sysmon configuration exists
-        if ($configContent -match "Microsoft-Windows-Sysmon/Operational") {
+        try {
             InfoMessage "Removing Sysmon configuration from Wazuh..."
             
-            # Remove the Sysmon configuration block
-            $lines = Get-Content $global:Config.WazuhConfigPath
-            $newLines = @()
-            $skipLines = $false
+            # Load the XML configuration
+            [xml]$configXml = Get-Content -Path $global:Config.WazuhConfigPath
             
-            foreach ($line in $lines) {
-                if ($line -match ".*Sysmon log collection.*") {
-                    $skipLines = $true
-                    continue
-                }
+            # Find Sysmon configuration
+            $sysmonConfig = $configXml.SelectSingleNode("//localfile[contains(location, 'Microsoft-Windows-Sysmon/Operational')]")
+            
+            if ($sysmonConfig) {
+                # Remove the Sysmon configuration
+                $sysmonConfig.ParentNode.RemoveChild($sysmonConfig) | Out-Null
                 
-                if ($skipLines -and $line -match ".*</localfile>.*") {
-                    $skipLines = $false
-                    continue
-                }
+                # Save the updated configuration
+                $configXml.Save($global:Config.WazuhConfigPath)
                 
-                if (-not $skipLines) {
-                    $newLines += $line
-                }
+                InfoMessage "Sysmon configuration removed from Wazuh successfully!"
+            } else {
+                WarnMessage "No Sysmon configuration found in Wazuh config file."
             }
-            
-            # Write the updated config back to file
-            $newLines | Out-File $global:Config.WazuhConfigPath -Encoding UTF8
-            
-            InfoMessage "Sysmon configuration removed from Wazuh successfully!"
-        } else {
-            WarnMessage "No Sysmon configuration found in Wazuh config file."
+        } catch {
+            ErrorMessage "Failed to modify Wazuh configuration: $($_.Exception.Message)"
+            WarnMessage "You may need to manually remove the Sysmon configuration from: $($global:Config.WazuhConfigPath)"
         }
     } else {
         ErrorMessage "Wazuh configuration file not found at $($global:Config.WazuhConfigPath)"

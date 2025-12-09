@@ -81,13 +81,23 @@ function Test-AdminPrivileges {
     return $isAdmin
 }
 
+function Test-SysmonInstalled {
+    $service = Get-Service -Name "Sysmon64" -ErrorAction SilentlyContinue
+    if ($service) {
+        return $true
+    }
+
+    return $false
+}
+
+
 # Download and extract Sysmon
 function Install-SysmonSoftware {
     PrintStep 1 "Downloading and installing Sysmon"
     
     # Check if Sysmon is already installed
-    if (Test-Path $global:Config.SysmonExePath) {
-        WarnMessage "Sysmon is already installed. Skipping installation."
+    if (Test-SysmonInstalled) {
+        WarnMessage "Sysmon is already installed. Uninstalling to reconfigure."
         return
     }
     
@@ -109,8 +119,17 @@ function Install-SysmonSoftware {
         # Create Sysmon installation directory
         Ensure-Directory -Path $global:Config.SysmonInstallPath
         
+        # Find the actual extracted files (they might be in a subdirectory)
+        $extractedFilesPath = $global:Config.SysmonExtractPath
+        $sysmonExePath = Get-ChildItem -Path $global:Config.SysmonExtractPath -Recurse -Filter "sysmon*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        
+        if ($sysmonExePath) {
+            # Get the directory containing the sysmon executable
+            $extractedFilesPath = $sysmonExePath.Directory.FullName
+        }
+        
         # Copy Sysmon files to installation directory
-        Copy-Item -Path "$($global:Config.SysmonExtractPath)\*" -Destination $global:Config.SysmonInstallPath -Force
+        Copy-Item -Path "$extractedFilesPath\*" -Destination $global:Config.SysmonInstallPath -Force
         InfoMessage "Sysmon copied to installation directory: $($global:Config.SysmonInstallPath)"
     } else {
         ErrorMessage "Failed to download Sysmon. Cannot proceed with installation."
@@ -129,7 +148,13 @@ function Configure-Sysmon {
     }
     
     # Copy configuration file to Sysmon directory
-    $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $scriptDir = $PSScriptRoot
+    if ([string]::IsNullOrEmpty($scriptDir)) {
+        $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+    }
+    if ([string]::IsNullOrEmpty($scriptDir)) {
+        $scriptDir = Get-Location
+    }
     $localConfigPath = Join-Path $scriptDir "sysmonconfig.xml"
     
     if (Test-Path $localConfigPath) {
@@ -140,13 +165,36 @@ function Configure-Sysmon {
         exit 1
     }
     
-    # Install Sysmon service
+    # Uninstall Sysmon first if service exists
+    if (Test-SysmonInstalled) {
+        InfoMessage "Sysmon service already installed. Uninstalling before reinstall..."
+        try {
+            Start-Process -FilePath $global:Config.SysmonExePath `
+                -ArgumentList "-u", "-accepteula" `
+                -NoNewWindow `
+                -RedirectStandardOutput "$env:TEMP\sysmon_uninstall.log" `
+                -RedirectStandardError "$env:TEMP\sysmon_uninstall_error.log" `
+                -Wait
+            InfoMessage "Existing Sysmon service uninstalled successfully."
+        } catch {
+            ErrorMessage "Failed to uninstall existing Sysmon service: $_"
+            exit 1
+        }
+    }
+    
+    # Install Sysmon service silently
     InfoMessage "Installing Sysmon service..."
     try {
-        Start-Process -FilePath $global:Config.SysmonExePath -ArgumentList "-accepteula", "-i", $global:Config.SysmonConfigPath -Wait -NoNewWindow
+        Start-Process -FilePath $global:Config.SysmonExePath `
+            -ArgumentList "-accepteula", "-i", "`"$($global:Config.SysmonConfigPath)`"" `
+            -WorkingDirectory $global:Config.SysmonInstallPath `
+            -NoNewWindow `
+            -RedirectStandardOutput "$env:TEMP\sysmon_install.log" `
+            -RedirectStandardError "$env:TEMP\sysmon_install_error.log" `
+            -Wait
         InfoMessage "Sysmon service installed successfully!"
     } catch {
-        ErrorMessage "Failed to install Sysmon service: $_"
+        ErrorMessage "Sysmon installation failed: $_"
         exit 1
     }
 }
@@ -156,41 +204,40 @@ function Configure-Wazuh {
     PrintStep 3 "Configuring Wazuh to read Sysmon logs"
     
     if (Test-Path $global:Config.WazuhConfigPath) {
-        # Read the current config
-        $configContent = Get-Content $global:Config.WazuhConfigPath -Raw
-        
-        # Check if Sysmon configuration already exists
-        if ($configContent -match "Microsoft-Windows-Sysmon/Operational") {
-            WarnMessage "Wazuh Sysmon configuration already exists."
-        } else {
-            # Backup the original config
-            Copy-Item $global:Config.WazuhConfigPath "$($global:Config.WazuhConfigPath).backup"
+        try {
+            InfoMessage "Updating Wazuh configuration to read Sysmon logs..."
             
-            # Find the position to insert the Sysmon configuration
-            # Insert before the closing </ossec_config> tag
-            $insertPosition = $configContent.LastIndexOf("</ossec_config>")
+            # Load the XML configuration
+            [xml]$configXml = Get-Content -Path $global:Config.WazuhConfigPath
             
-            if ($insertPosition -gt 0) {
-                # Create the Sysmon configuration block
-                $sysmonConfigBlock = @"
-    
-    <!-- Sysmon log collection -->
-    <localfile>
-      <location>Microsoft-Windows-Sysmon/Operational</location>
-      <log_format>eventchannel</log_format>
-    </localfile>
-"@
+            # Check if Sysmon configuration already exists
+            $existingSysmonConfig = $configXml.SelectSingleNode("//localfile[contains(location, 'Microsoft-Windows-Sysmon/Operational')]")
+            
+            if ($existingSysmonConfig) {
+                WarnMessage "Wazuh Sysmon configuration already exists."
+            } else {
+                # Create new localfile element for Sysmon
+                $localFileElement = $configXml.CreateElement("localfile")
                 
-                # Insert the Sysmon configuration block
-                $newConfigContent = $configContent.Insert($insertPosition, $sysmonConfigBlock)
+                $locationElement = $configXml.CreateElement("location")
+                $locationElement.InnerText = "Microsoft-Windows-Sysmon/Operational"
+                $localFileElement.AppendChild($locationElement) | Out-Null
                 
-                # Write the updated config back to file
-                $newConfigContent | Out-File $global:Config.WazuhConfigPath -Encoding UTF8
+                $logFormatElement = $configXml.CreateElement("log_format")
+                $logFormatElement.InnerText = "eventchannel"
+                $localFileElement.AppendChild($logFormatElement) | Out-Null
+                
+                # Append to the ossec_config element
+                $configXml.ossec_config.AppendChild($localFileElement) | Out-Null
+                
+                # Save the updated configuration
+                $configXml.Save($global:Config.WazuhConfigPath)
                 
                 InfoMessage "Wazuh configuration updated successfully!"
-            } else {
-                ErrorMessage "Could not find the proper location to insert Sysmon configuration in Wazuh config file."
             }
+        } catch {
+            ErrorMessage "Failed to update Wazuh configuration: $($_.Exception.Message)"
+            WarnMessage "You may need to manually add the Sysmon configuration to: $($global:Config.WazuhConfigPath)"
         }
     } else {
         ErrorMessage "Wazuh configuration file not found at $($global:Config.WazuhConfigPath)"
@@ -256,6 +303,11 @@ function Install-Sysmon {
         ErrorMessage "Installation failed: $_"
         exit 1
     }
+}
+# If the EXE exists but Sysmon service is NOT installed → Clean up the bad install
+if ((Test-Path $global:Config.SysmonExePath) -and -not (Test-SysmonInstalled)) {
+    WarnMessage "Sysmon files exist but service is not installed. Cleaning up partial installation..."
+    Remove-Item -Path $global:Config.SysmonInstallPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # Execute the main installation function
