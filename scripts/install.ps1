@@ -157,11 +157,25 @@ function Configure-Sysmon {
     }
     $localConfigPath = Join-Path $scriptDir "sysmonconfig.xml"
     
+    # If local config not found, try to download it
+    if (-Not (Test-Path $localConfigPath)) {
+        InfoMessage "Local sysmonconfig.xml not found. Attempting to download from repository..."
+        try {
+            $repoConfigUrl = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/install-configure/scripts/sysmonconfig.xml"
+            Download-File -Url $repoConfigUrl -OutputPath $localConfigPath
+            InfoMessage "Downloaded sysmonconfig.xml from repository"
+        } catch {
+            ErrorMessage "Failed to download sysmonconfig.xml from repository: $_"
+            ErrorMessage "Please ensure sysmonconfig.xml is in the same directory as this script"
+            exit 1
+        }
+    }
+    
     if (Test-Path $localConfigPath) {
         Copy-Item -Path $localConfigPath -Destination $global:Config.SysmonConfigPath -Force
         InfoMessage "Copied Sysmon configuration to $($global:Config.SysmonConfigPath)"
     } else {
-        ErrorMessage "Local Sysmon configuration file not found at $localConfigPath"
+        ErrorMessage "Sysmon configuration file not found at $localConfigPath"
         exit 1
     }
     
