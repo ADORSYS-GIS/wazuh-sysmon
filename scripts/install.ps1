@@ -7,7 +7,6 @@ $global:Config = @{
     SysmonInstallPath  = "C:\Program Files\Sysmon"
     SysmonExePath      = "C:\Program Files\Sysmon\sysmon64.exe"
     SysmonConfigPath   = "C:\Program Files\Sysmon\sysmonconfig.xml"
-    WazuhConfigPath    = "C:\Program Files (x86)\ossec-agent\ossec.conf"
 }
 
 # Function to handle logging
@@ -213,71 +212,9 @@ function Configure-Sysmon {
     }
 }
 
-# Configure Wazuh to read Sysmon logs
-function Configure-Wazuh {
-    PrintStep 3 "Configuring Wazuh to read Sysmon logs"
-    
-    if (Test-Path $global:Config.WazuhConfigPath) {
-        try {
-            InfoMessage "Updating Wazuh configuration to read Sysmon logs..."
-            
-            # Load the XML configuration
-            [xml]$configXml = Get-Content -Path $global:Config.WazuhConfigPath
-            
-            # Check if Sysmon configuration already exists
-            $existingSysmonConfig = $configXml.SelectSingleNode("//localfile[contains(location, 'Microsoft-Windows-Sysmon/Operational')]")
-            
-            if ($existingSysmonConfig) {
-                WarnMessage "Wazuh Sysmon configuration already exists."
-            } else {
-                # Create new localfile element for Sysmon
-                $localFileElement = $configXml.CreateElement("localfile")
-                
-                $locationElement = $configXml.CreateElement("location")
-                $locationElement.InnerText = "Microsoft-Windows-Sysmon/Operational"
-                $localFileElement.AppendChild($locationElement) | Out-Null
-                
-                $logFormatElement = $configXml.CreateElement("log_format")
-                $logFormatElement.InnerText = "eventchannel"
-                $localFileElement.AppendChild($logFormatElement) | Out-Null
-                
-                # Append to the ossec_config element
-                $configXml.ossec_config.AppendChild($localFileElement) | Out-Null
-                
-                # Save the updated configuration
-                $configXml.Save($global:Config.WazuhConfigPath)
-                
-                InfoMessage "Wazuh configuration updated successfully!"
-            }
-        } catch {
-            ErrorMessage "Failed to update Wazuh configuration: $($_.Exception.Message)"
-            WarnMessage "You may need to manually add the Sysmon configuration to: $($global:Config.WazuhConfigPath)"
-        }
-    } else {
-        ErrorMessage "Wazuh configuration file not found at $($global:Config.WazuhConfigPath)"
-        WarnMessage "Please manually add the following to your Wazuh configuration:"
-        Write-Host "<localfile>" -ForegroundColor Yellow
-        Write-Host "  <location>Microsoft-Windows-Sysmon/Operational</location>" -ForegroundColor Yellow
-        Write-Host "  <log_format>eventchannel</log_format>" -ForegroundColor Yellow
-        Write-Host "</localfile>" -ForegroundColor Yellow
-    }
-}
-
-# Restart Wazuh service
-function Restart-WazuhService {
-    PrintStep 4 "Restarting Wazuh service"
-    
-    try {
-        Restart-Service WazuhSvc -Force
-        InfoMessage "Wazuh service restarted successfully!"
-    } catch {
-        ErrorMessage "Failed to restart Wazuh service. Please restart it manually."
-    }
-}
-
 # Clean up temporary files
 function Cleanup-TempFiles {
-    PrintStep 5 "Cleaning up temporary files"
+    PrintStep 3 "Cleaning up temporary files"
     
     try {
         if (Test-Path $global:Config.SysmonZipPath) {
@@ -307,8 +244,6 @@ function Install-Sysmon {
         
         Install-SysmonSoftware
         Configure-Sysmon
-        Configure-Wazuh
-        Restart-WazuhService
         Cleanup-TempFiles
         
         SuccessMessage "Sysmon installation and configuration completed!"

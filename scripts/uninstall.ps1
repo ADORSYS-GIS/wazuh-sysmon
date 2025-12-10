@@ -3,7 +3,6 @@ $global:Config = @{
     TempDir            = "C:\Temp"
     SysmonInstallPath  = "C:\Program Files\Sysmon"
     SysmonExePath      = "C:\Program Files\Sysmon\sysmon64.exe"
-    WazuhConfigPath    = "C:\Program Files (x86)\ossec-agent\ossec.conf"
 }
 
 # Function to handle logging
@@ -56,13 +55,7 @@ function Uninstall-SysmonService {
     if (Test-Path $global:Config.SysmonExePath) {
         InfoMessage "Uninstalling Sysmon using installed executable..."
         try {
-            $process = Start-Process -FilePath $global:Config.SysmonExePath `
-             -ArgumentList "-u" `
-             -Wait `
-             -NoNewWindow `
-             -RedirectStandardOutput "$env:TEMP\sysmon_install.log" `
-             -RedirectStandardError "$env:TEMP\sysmon_install_error.log" `
-             -PassThru
+            $process = Start-Process -FilePath $global:Config.SysmonExePath -ArgumentList "-u" -Wait -NoNewWindow -PassThru
             if ($process.ExitCode -eq 0) {
                 InfoMessage "Sysmon uninstalled successfully!"
             } else {
@@ -75,11 +68,7 @@ function Uninstall-SysmonService {
         # Try to uninstall using sysmon from PATH
         InfoMessage "Sysmon executable not found in installation path. Trying to uninstall using sysmon from PATH..."
         try {
-            $process = Start-Process -FilePath "sysmon64.exe" `
-             -ArgumentList "-u" `
-             -Wait `
-             -NoNewWindow `
-             -PassThru
+            $process = Start-Process -FilePath "sysmon64.exe" -ArgumentList "-u" -Wait -NoNewWindow -PassThru
             if ($process.ExitCode -eq 0) {
                 InfoMessage "Sysmon uninstalled successfully!"
             } else {
@@ -87,11 +76,7 @@ function Uninstall-SysmonService {
             }
         } catch {
             try {
-                $process = Start-Process -FilePath "sysmon.exe" `
-                 -ArgumentList "-u" `
-                 -Wait `
-                 -NoNewWindow `
-                 -PassThru
+                $process = Start-Process -FilePath "sysmon.exe" -ArgumentList "-u" -Wait -NoNewWindow -PassThru
                 if ($process.ExitCode -eq 0) {
                     InfoMessage "Sysmon uninstalled successfully!"
                 } else {
@@ -127,52 +112,6 @@ function Remove-SysmonInstallation {
     }
 }
 
-# Remove Sysmon configuration from Wazuh
-function Remove-WazuhSysmonConfig {
-    PrintStep 3 "Removing Sysmon configuration from Wazuh"
-    
-    if (Test-Path $global:Config.WazuhConfigPath) {
-        try {
-            InfoMessage "Removing Sysmon configuration from Wazuh..."
-            
-            # Load the XML configuration
-            [xml]$configXml = Get-Content -Path $global:Config.WazuhConfigPath
-            
-            # Find Sysmon configuration
-            $sysmonConfig = $configXml.SelectSingleNode("//localfile[contains(location, 'Microsoft-Windows-Sysmon/Operational')]")
-            
-            if ($sysmonConfig) {
-                # Remove the Sysmon configuration
-                $sysmonConfig.ParentNode.RemoveChild($sysmonConfig) | Out-Null
-                
-                # Save the updated configuration
-                $configXml.Save($global:Config.WazuhConfigPath)
-                
-                InfoMessage "Sysmon configuration removed from Wazuh successfully!"
-            } else {
-                WarnMessage "No Sysmon configuration found in Wazuh config file."
-            }
-        } catch {
-            ErrorMessage "Failed to modify Wazuh configuration: $($_.Exception.Message)"
-            WarnMessage "You may need to manually remove the Sysmon configuration from: $($global:Config.WazuhConfigPath)"
-        }
-    } else {
-        ErrorMessage "Wazuh configuration file not found at $($global:Config.WazuhConfigPath)"
-    }
-}
-
-# Restart Wazuh service
-function Restart-WazuhService {
-    PrintStep 4 "Restarting Wazuh service"
-    
-    try {
-        Restart-Service WazuhSvc -Force
-        InfoMessage "Wazuh service restarted successfully!"
-    } catch {
-        ErrorMessage "Failed to restart Wazuh service. Please restart it manually."
-    }
-}
-
 # Main function that runs the uninstallation steps
 function Uninstall-Sysmon {
     try {
@@ -186,8 +125,6 @@ function Uninstall-Sysmon {
         
         Uninstall-SysmonService
         Remove-SysmonInstallation
-        Remove-WazuhSysmonConfig
-        Restart-WazuhService
         
         SuccessMessage "Sysmon uninstallation completed!"
     } catch {
