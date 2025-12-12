@@ -47,6 +47,16 @@ function Test-AdminPrivileges {
     return $isAdmin
 }
 
+# Check if Sysmon is installed
+function Test-SysmonInstalled {
+    $service = Get-Service -Name "Sysmon64" -ErrorAction SilentlyContinue
+    if ($service) {
+        return $true
+    }
+
+    return $false
+}
+
 # Uninstall Sysmon service
 function Uninstall-SysmonService {
     PrintStep 1 "Uninstalling Sysmon service"
@@ -115,6 +125,12 @@ function Remove-SysmonInstallation {
 # Main function that runs the uninstallation steps
 function Uninstall-Sysmon {
     try {
+        # Check is sysmon is installed
+        if (-Not (Test-SysmonInstalled)) {
+            WarnMessage "Sysmon is not installed. Nothing to uninstall."
+            exit 0
+        }
+        
         # Check for admin privileges
         if (-Not (Test-AdminPrivileges)) {
             ErrorMessage "This script must be run as Administrator"
