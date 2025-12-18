@@ -122,27 +122,57 @@ function Remove-SysmonInstallation {
     }
 }
 
+# Disable Script Block Logging and Module Logging
+function Disable-PowerShellLogging {
+    PrintStep 3 "Disabling PowerShell Script Block and Module Logging"
+    
+    try {
+        # Disable Script Block Logging
+        InfoMessage "Disabling Script Block Logging..."
+        if (Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging") {
+            Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Name "EnableScriptBlockLogging" -Value 0
+            InfoMessage "Script Block Logging disabled successfully!"
+        } else {
+            InfoMessage "Script Block Logging was not configured."
+        }
+        
+        # Disable Module Logging
+        InfoMessage "Disabling Module Logging..."
+        if (Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging") {
+            Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging" -Name "EnableModuleLogging" -Value 0
+            InfoMessage "Module Logging disabled successfully!"
+        } else {
+            InfoMessage "Module Logging was not configured."
+        }
+    } catch {
+        ErrorMessage "Failed to disable PowerShell logging: $_"
+        WarnMessage "Continuing with Sysmon uninstallation..."
+    }
+}
+
 # Main function that runs the uninstallation steps
 function Uninstall-Sysmon {
     try {
-        # Check is sysmon is installed
-        if (-Not (Test-SysmonInstalled)) {
-            WarnMessage "Sysmon is not installed. Nothing to uninstall."
-            exit 0
-        }
-        
         # Check for admin privileges
         if (-Not (Test-AdminPrivileges)) {
             ErrorMessage "This script must be run as Administrator"
             exit 1
         }
         
+        # Check if Sysmon is installed
+        if (-Not (Test-SysmonInstalled)) {
+            WarnMessage "Sysmon is not installed. Nothing to uninstall."
+            exit 0
+        }
+        
         InfoMessage "Starting Sysmon uninstallation..."
         
         Uninstall-SysmonService
         Remove-SysmonInstallation
+        Disable-PowerShellLogging
         
         SuccessMessage "Sysmon uninstallation completed!"
+        InfoMessage "PowerShell Script Block and Module Logging have been disabled."
     } catch {
         ErrorMessage "Uninstallation failed: $_"
         exit 1

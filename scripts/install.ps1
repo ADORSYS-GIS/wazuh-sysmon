@@ -212,9 +212,33 @@ function Configure-Sysmon {
     }
 }
 
+# Enable Script Block Logging and Module Logging
+function Enable-PowerShellLogging {
+    PrintStep 3 "Enabling PowerShell Script Block and Module Logging"
+    
+    try {
+        # Enable Script Block Logging
+        InfoMessage "Enabling Script Block Logging..."
+        New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Force | Out-Null
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Name "EnableScriptBlockLogging" -Value 1
+        InfoMessage "Script Block Logging enabled successfully!"
+        
+        # Enable Module Logging (optional, more verbose)
+        InfoMessage "Enabling Module Logging..."
+        New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging" -Force | Out-Null
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging" -Name "EnableModuleLogging" -Value 1
+        New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames" -Force | Out-Null
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging\ModuleNames" -Name "*" -Value "*"
+        InfoMessage "Module Logging enabled successfully!"
+    } catch {
+        ErrorMessage "Failed to enable PowerShell logging: $_"
+        WarnMessage "Continuing with Sysmon installation..."
+    }
+}
+
 # Clean up temporary files
 function Cleanup-TempFiles {
-    PrintStep 3 "Cleaning up temporary files"
+    PrintStep 4 "Cleaning up temporary files"
     
     try {
         if (Test-Path $global:Config.SysmonZipPath) {
@@ -240,14 +264,26 @@ function Install-Sysmon {
             exit 1
         }
         
+        # Check if Sysmon is already installed
+        if (Test-SysmonInstalled) {
+            WarnMessage "Sysmon is already installed."
+            $response = Read-Host "Do you want to reinstall Sysmon? (y/N)"
+            if ($response -ne "y" -and $response -ne "Y") {
+                InfoMessage "Installation cancelled by user."
+                exit 0
+            }
+        }
+        
         InfoMessage "Starting Sysmon installation and configuration..."
         
         Install-SysmonSoftware
         Configure-Sysmon
+        Enable-PowerShellLogging
         Cleanup-TempFiles
         
         SuccessMessage "Sysmon installation and configuration completed!"
         InfoMessage "Sysmon is now monitoring Process Creation events for curl, wget, powershell, and pwsh."
+        InfoMessage "PowerShell Script Block and Module Logging have been enabled."
     } catch {
         ErrorMessage "Installation failed: $_"
         exit 1
