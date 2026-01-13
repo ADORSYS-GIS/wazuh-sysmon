@@ -7,7 +7,7 @@
         <OriginalFileName condition="is">wget.exe</OriginalFileName>
         <OriginalFileName condition="is">powershell.exe</OriginalFileName>
         <OriginalFileName condition="is">pwsh.exe</OriginalFileName>
-        <OriginalFileName condition="is">pscp.exe</OriginalFileName>
+        <OriginalFileName condition="is">PSCP</OriginalFileName>
       </ProcessCreate>
     </RuleGroup>
   </EventFiltering>
