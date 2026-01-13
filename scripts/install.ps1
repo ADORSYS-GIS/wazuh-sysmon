@@ -7,6 +7,8 @@ $global:Config = @{
     SysmonInstallPath  = "C:\Program Files\Sysmon"
     SysmonExePath      = "C:\Program Files\Sysmon\sysmon64.exe"
     SysmonConfigPath   = "C:\Program Files\Sysmon\sysmonconfig.xml"
+    SysmonConfigUrl    = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/install-configure/config/sysmonconfig.xml"
+    SysmonUninstallUrl = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/install-configure/scripts/uninstall.ps1"
 }
 
 # Function to handle logging
@@ -93,13 +95,7 @@ function Test-SysmonInstalled {
 # Download and extract Sysmon
 function Install-SysmonSoftware {
     PrintStep 1 "Downloading and installing Sysmon"
-    
-    # Check if Sysmon is already installed
-    if (Test-SysmonInstalled) {
-        WarnMessage "Sysmon is already installed. Uninstalling to reconfigure."
-        return
-    }
-    
+
     # Ensure temp directory exists
     Ensure-Directory -Path $global:Config.TempDir
     
@@ -136,6 +132,63 @@ function Install-SysmonSoftware {
     }
 }
 
+
+function Uninstall-ExistingSysmon {
+    PrintStep 0 "Uninstalling any existing Sysmon installation"
+    
+    $uninstallScriptPath = "$env:TEMP\uninstall.ps1"
+    
+    try {
+        InfoMessage "Downloading uninstall script from $($global:Config.SysmonUninstallUrl)..."
+        Invoke-WebRequest -Uri $global:Config.SysmonUninstallUrl -OutFile $uninstallScriptPath -Headers @{"User-Agent"="Mozilla/5.0"} -ErrorAction Stop
+        InfoMessage "Downloaded uninstall script."
+        
+        InfoMessage "Executing uninstall script with -KeepLogging..."
+        & $uninstallScriptPath -KeepLogging
+        
+        InfoMessage "Existing Sysmon uninstalled (logging settings preserved)."
+    } catch {
+        WarnMessage "Failed to download or run uninstall script: $_"
+        InfoMessage "Continuing with installation (assuming clean state or overwrite)..."
+    }
+}
+
+function Verify-Installation {
+    PrintStep 5 "Verifying Sysmon Installation"
+    $verificationFailed = $false
+
+    # 1. Check Service
+    $service = Get-Service -Name "Sysmon64" -ErrorAction SilentlyContinue
+    if ($service -and $service.Status -eq 'Running') {
+        SuccessMessage "Verification: Sysmon64 service is running."
+    } else {
+        ErrorMessage "Verification: Sysmon64 service is NOT running."
+        $verificationFailed = $true
+    }
+
+    # 2. Check Configuration File
+    if (Test-Path $global:Config.SysmonConfigPath) {
+        SuccessMessage "Verification: Configuration file exists at $($global:Config.SysmonConfigPath)."
+    } else {
+        ErrorMessage "Verification: Configuration file missing at $($global:Config.SysmonConfigPath)."
+        $verificationFailed = $true
+    }
+
+    # 3. Check Registry
+    if (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Services\Sysmon64") {
+        SuccessMessage "Verification: Sysmon64 registry key exists."
+    } else {
+        ErrorMessage "Verification: Sysmon64 registry key missing."
+        $verificationFailed = $true
+    }
+    
+    if ($verificationFailed) {
+        throw "Sysmon verification failed. Please check the logs."
+    } else {
+        SuccessMessage "All verification checks passed!"
+    }
+}
+
 # Install Sysmon service with configuration
 function Configure-Sysmon {
     PrintStep 2 "Configuring Sysmon service"
@@ -156,18 +209,14 @@ function Configure-Sysmon {
     }
     $localConfigPath = Join-Path $scriptDir "sysmonconfig.xml"
     
-    # If local config not found, try to download it
-    if (-Not (Test-Path $localConfigPath)) {
-        InfoMessage "Local sysmonconfig.xml not found. Attempting to download from repository..."
-        try {
-            $repoConfigUrl = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/install-configure/scripts/sysmonconfig.xml"
-            Download-File -Url $repoConfigUrl -OutputPath $localConfigPath
-            InfoMessage "Downloaded sysmonconfig.xml from repository"
-        } catch {
-            ErrorMessage "Failed to download sysmonconfig.xml from repository: $_"
-            ErrorMessage "Please ensure sysmonconfig.xml is in the same directory as this script"
-            exit 1
-        }
+    
+    InfoMessage "Downloading sysmonconfig.xml..."
+    try {
+        Download-File -Url $global:Config.SysmonConfigUrl -OutputPath $localConfigPath
+        InfoMessage "Downloaded sysmonconfig.xml from repository"
+    } catch {
+        ErrorMessage "Failed to download sysmonconfig.xml from repository: $_"
+        exit 1
     }
     
     if (Test-Path $localConfigPath) {
@@ -178,23 +227,7 @@ function Configure-Sysmon {
         exit 1
     }
     
-    # Uninstall Sysmon first if service exists
-    if (Test-SysmonInstalled) {
-        InfoMessage "Sysmon service already installed. Uninstalling before reinstall..."
-        try {
-            Start-Process -FilePath $global:Config.SysmonExePath `
-                -ArgumentList "-u", "-accepteula" `
-                -NoNewWindow `
-                -RedirectStandardOutput "$env:TEMP\sysmon_uninstall.log" `
-                -RedirectStandardError "$env:TEMP\sysmon_uninstall_error.log" `
-                -Wait
-            InfoMessage "Existing Sysmon service uninstalled successfully."
-        } catch {
-            ErrorMessage "Failed to uninstall existing Sysmon service: $_"
-            exit 1
-        }
-    }
-    
+
     # Install Sysmon service silently
     InfoMessage "Installing Sysmon service..."
     try {
@@ -264,22 +297,15 @@ function Install-Sysmon {
             exit 1
         }
         
-        # Check if Sysmon is already installed
-        if (Test-SysmonInstalled) {
-            WarnMessage "Sysmon is already installed."
-            $response = Read-Host "Do you want to reinstall Sysmon? (y/N)"
-            if ($response -ne "y" -and $response -ne "Y") {
-                InfoMessage "Installation cancelled by user."
-                exit 0
-            }
-        }
-        
         InfoMessage "Starting Sysmon installation and configuration..."
         
+
+        Uninstall-ExistingSysmon
         Install-SysmonSoftware
         Configure-Sysmon
         Enable-PowerShellLogging
         Cleanup-TempFiles
+        Verify-Installation
         
         SuccessMessage "Sysmon installation and configuration completed!"
         InfoMessage "Sysmon is now monitoring Process Creation events for curl, wget, powershell, and pwsh."

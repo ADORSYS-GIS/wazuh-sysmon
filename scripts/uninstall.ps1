@@ -1,4 +1,8 @@
 # Global configuration
+param (
+    [switch]$KeepLogging
+)
+
 $global:Config = @{
     TempDir            = "C:\Temp"
     SysmonInstallPath  = "C:\Program Files\Sysmon"
@@ -57,9 +61,31 @@ function Test-SysmonInstalled {
     return $false
 }
 
+# Remove Sysmon Registry Keys (Fallback)
+function Remove-SysmonRegistry {
+    PrintStep "1b" "Removing Sysmon Registry Keys manually"
+    
+    $registryKeys = @(
+        "HKLM:\SYSTEM\CurrentControlSet\Services\Sysmon64",
+        "HKLM:\SYSTEM\CurrentControlSet\Services\SysmonDrv"
+    )
+
+    foreach ($key in $registryKeys) {
+        if (Test-Path $key) {
+            try {
+                Remove-Item -Path $key -Recurse -Force -ErrorAction Stop
+                InfoMessage "Removed registry key: $key"
+            } catch {
+                ErrorMessage "Failed to remove registry key $key : $_"
+            }
+        }
+    }
+}
+
 # Uninstall Sysmon service
 function Uninstall-SysmonService {
     PrintStep 1 "Uninstalling Sysmon service"
+    $uninstallSuccess = $false
     
     # Try to uninstall using sysmon from installation path
     if (Test-Path $global:Config.SysmonExePath) {
@@ -68,8 +94,9 @@ function Uninstall-SysmonService {
             $process = Start-Process -FilePath $global:Config.SysmonExePath -ArgumentList "-u" -Wait -NoNewWindow -PassThru
             if ($process.ExitCode -eq 0) {
                 InfoMessage "Sysmon uninstalled successfully!"
+                $uninstallSuccess = $true
             } else {
-                InfoMessage "Sysmon uninstallation returned exit code: $($process.ExitCode). This might be expected if Sysmon wasn't installed."
+                WarnMessage "Sysmon uninstallation returned exit code: $($process.ExitCode)."
             }
         } catch {
             ErrorMessage "Failed to uninstall Sysmon using installed executable: $_"
@@ -81,21 +108,29 @@ function Uninstall-SysmonService {
             $process = Start-Process -FilePath "sysmon64.exe" -ArgumentList "-u" -Wait -NoNewWindow -PassThru
             if ($process.ExitCode -eq 0) {
                 InfoMessage "Sysmon uninstalled successfully!"
+                $uninstallSuccess = $true
             } else {
-                InfoMessage "Sysmon uninstallation returned exit code: $($process.ExitCode). This might be expected if Sysmon wasn't installed."
+                WarnMessage "Sysmon uninstallation returned exit code: $($process.ExitCode)."
             }
         } catch {
             try {
                 $process = Start-Process -FilePath "sysmon.exe" -ArgumentList "-u" -Wait -NoNewWindow -PassThru
                 if ($process.ExitCode -eq 0) {
                     InfoMessage "Sysmon uninstalled successfully!"
+                    $uninstallSuccess = $true
                 } else {
-                    InfoMessage "Sysmon uninstallation returned exit code: $($process.ExitCode). This might be expected if Sysmon wasn't installed."
+                    WarnMessage "Sysmon uninstallation returned exit code: $($process.ExitCode)."
                 }
             } catch {
-                WarnMessage "Failed to uninstall Sysmon. This might be expected if Sysmon wasn't installed or was already uninstalled."
+                WarnMessage "Failed to uninstall Sysmon via command line."
             }
         }
+    }
+
+    # Fallback to registry cleanup if uninstall failed or if service still exists
+    if (-not $uninstallSuccess -or (Test-SysmonInstalled)) {
+        WarnMessage "Standard uninstallation failed or service still detected. Attempting manual registry cleanup..."
+        Remove-SysmonRegistry
     }
 }
 
@@ -124,6 +159,11 @@ function Remove-SysmonInstallation {
 
 # Disable Script Block Logging and Module Logging
 function Disable-PowerShellLogging {
+    if ($KeepLogging) {
+        InfoMessage "Skipping Disable-PowerShellLogging as -KeepLogging was specified."
+        return
+    }
+
     PrintStep 3 "Disabling PowerShell Script Block and Module Logging"
     
     try {
@@ -159,12 +199,6 @@ function Uninstall-Sysmon {
             exit 1
         }
         
-        # Check if Sysmon is installed
-        if (-Not (Test-SysmonInstalled)) {
-            WarnMessage "Sysmon is not installed. Nothing to uninstall."
-            exit 0
-        }
-        
         InfoMessage "Starting Sysmon uninstallation..."
         
         Uninstall-SysmonService
@@ -172,7 +206,9 @@ function Uninstall-Sysmon {
         Disable-PowerShellLogging
         
         SuccessMessage "Sysmon uninstallation completed!"
-        InfoMessage "PowerShell Script Block and Module Logging have been disabled."
+        if (-not $KeepLogging) {
+            InfoMessage "PowerShell Script Block and Module Logging have been disabled."
+        }
     } catch {
         ErrorMessage "Uninstallation failed: $_"
         exit 1
