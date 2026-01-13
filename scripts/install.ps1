@@ -231,13 +231,20 @@ function Configure-Sysmon {
     # Install Sysmon service silently
     InfoMessage "Installing Sysmon service..."
     try {
-        Start-Process -FilePath $Script:Config.SysmonExePath `
-            -ArgumentList "-accepteula", "-i", "`"$($Script:Config.SysmonConfigPath)`"" `
-            -WorkingDirectory $Script:Config.SysmonInstallPath `
-            -NoNewWindow `
-            -RedirectStandardOutput "$env:TEMP\sysmon_install.log" `
-            -RedirectStandardError "$env:TEMP\sysmon_install_error.log" `
-            -Wait
+        $process = Start-Process -FilePath $Script:Config.SysmonExePath `
+        -ArgumentList "-accepteula", "-i", "`"$($Script:Config.SysmonConfigPath)`"" `
+        -WorkingDirectory $Script:Config.SysmonInstallPath `
+        -NoNewWindow `
+        -RedirectStandardOutput "$env:TEMP\sysmon_install.log" `
+        -RedirectStandardError "$env:TEMP\sysmon_install_error.log" `
+        -Wait `
+        -PassThru
+    if ($process.ExitCode -ne 0) {
+        $errorLog = Get-Content "$env:TEMP\sysmon_install_error.log" -Raw
+        ErrorMessage "Sysmon installation failed with exit code $($process.ExitCode). Error: $errorLog"
+        exit 1
+    }
+    
         InfoMessage "Sysmon service installed successfully!"
     } catch {
         ErrorMessage "Sysmon installation failed: $_"
