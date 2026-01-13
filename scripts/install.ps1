@@ -1,5 +1,5 @@
 # Global configuration
-$global:Config = @{
+$Script:Config = @{
     TempDir            = "C:\Temp"
     SysmonZipUrl       = "https://download.sysinternals.com/files/Sysmon.zip"
     SysmonZipPath      = "C:\Temp\Sysmon.zip"
@@ -97,26 +97,26 @@ function Install-SysmonSoftware {
     PrintStep 1 "Downloading and installing Sysmon"
 
     # Ensure temp directory exists
-    Ensure-Directory -Path $global:Config.TempDir
+    Ensure-Directory -Path $Script:Config.TempDir
     
     # Download Sysmon zip file
-    if (-Not (Test-Path $global:Config.SysmonZipPath)) {
+    if (-Not (Test-Path $Script:Config.SysmonZipPath)) {
         InfoMessage "Downloading Sysmon from Microsoft..."
-        Download-File -Url $global:Config.SysmonZipUrl -OutputPath $global:Config.SysmonZipPath
+        Download-File -Url $Script:Config.SysmonZipUrl -OutputPath $Script:Config.SysmonZipPath
     }
     
     # Extract Sysmon
-    if (Test-Path $global:Config.SysmonZipPath) {
+    if (Test-Path $Script:Config.SysmonZipPath) {
         InfoMessage "Extracting Sysmon..."
-        Ensure-Directory -Path $global:Config.SysmonExtractPath
-        Expand-Archive -Path $global:Config.SysmonZipPath -DestinationPath $global:Config.SysmonExtractPath -Force
+        Ensure-Directory -Path $Script:Config.SysmonExtractPath
+        Expand-Archive -Path $Script:Config.SysmonZipPath -DestinationPath $Script:Config.SysmonExtractPath -Force
         
         # Create Sysmon installation directory
-        Ensure-Directory -Path $global:Config.SysmonInstallPath
+        Ensure-Directory -Path $Script:Config.SysmonInstallPath
         
         # Find the actual extracted files (they might be in a subdirectory)
-        $extractedFilesPath = $global:Config.SysmonExtractPath
-        $sysmonExePath = Get-ChildItem -Path $global:Config.SysmonExtractPath -Recurse -Filter "sysmon*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $extractedFilesPath = $Script:Config.SysmonExtractPath
+        $sysmonExePath = Get-ChildItem -Path $Script:Config.SysmonExtractPath -Recurse -Filter "sysmon*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
         
         if ($sysmonExePath) {
             # Get the directory containing the sysmon executable
@@ -124,8 +124,8 @@ function Install-SysmonSoftware {
         }
         
         # Copy Sysmon files to installation directory
-        Copy-Item -Path "$extractedFilesPath\*" -Destination $global:Config.SysmonInstallPath -Force
-        InfoMessage "Sysmon copied to installation directory: $($global:Config.SysmonInstallPath)"
+        Copy-Item -Path "$extractedFilesPath\*" -Destination $Script:Config.SysmonInstallPath -Force
+        InfoMessage "Sysmon copied to installation directory: $($Script:Config.SysmonInstallPath)"
     } else {
         ErrorMessage "Failed to download Sysmon. Cannot proceed with installation."
         exit 1
@@ -139,8 +139,8 @@ function Uninstall-ExistingSysmon {
     $uninstallScriptPath = "$env:TEMP\uninstall.ps1"
     
     try {
-        InfoMessage "Downloading uninstall script from $($global:Config.SysmonUninstallUrl)..."
-        Invoke-WebRequest -Uri $global:Config.SysmonUninstallUrl -OutFile $uninstallScriptPath -Headers @{"User-Agent"="Mozilla/5.0"} -ErrorAction Stop
+        InfoMessage "Downloading uninstall script from $($Script:Config.SysmonUninstallUrl)..."
+        Invoke-WebRequest -Uri $Script:Config.SysmonUninstallUrl -OutFile $uninstallScriptPath -Headers @{"User-Agent"="Mozilla/5.0"} -ErrorAction Stop
         InfoMessage "Downloaded uninstall script."
         
         InfoMessage "Executing uninstall script with -KeepLogging..."
@@ -167,10 +167,10 @@ function Verify-Installation {
     }
 
     # 2. Check Configuration File
-    if (Test-Path $global:Config.SysmonConfigPath) {
-        SuccessMessage "Verification: Configuration file exists at $($global:Config.SysmonConfigPath)."
+    if (Test-Path $Script:Config.SysmonConfigPath) {
+        SuccessMessage "Verification: Configuration file exists at $($Script:Config.SysmonConfigPath)."
     } else {
-        ErrorMessage "Verification: Configuration file missing at $($global:Config.SysmonConfigPath)."
+        ErrorMessage "Verification: Configuration file missing at $($Script:Config.SysmonConfigPath)."
         $verificationFailed = $true
     }
 
@@ -194,8 +194,8 @@ function Configure-Sysmon {
     PrintStep 2 "Configuring Sysmon service"
     
     # Check if sysmon executable exists
-    if (-Not (Test-Path $global:Config.SysmonExePath)) {
-        ErrorMessage "Sysmon executable not found at $($global:Config.SysmonExePath)"
+    if (-Not (Test-Path $Script:Config.SysmonExePath)) {
+        ErrorMessage "Sysmon executable not found at $($Script:Config.SysmonExePath)"
         exit 1
     }
     
@@ -212,7 +212,7 @@ function Configure-Sysmon {
     
     InfoMessage "Downloading sysmonconfig.xml..."
     try {
-        Download-File -Url $global:Config.SysmonConfigUrl -OutputPath $localConfigPath
+        Download-File -Url $Script:Config.SysmonConfigUrl -OutputPath $localConfigPath
         InfoMessage "Downloaded sysmonconfig.xml from repository"
     } catch {
         ErrorMessage "Failed to download sysmonconfig.xml from repository: $_"
@@ -220,8 +220,8 @@ function Configure-Sysmon {
     }
     
     if (Test-Path $localConfigPath) {
-        Copy-Item -Path $localConfigPath -Destination $global:Config.SysmonConfigPath -Force
-        InfoMessage "Copied Sysmon configuration to $($global:Config.SysmonConfigPath)"
+        Copy-Item -Path $localConfigPath -Destination $Script:Config.SysmonConfigPath -Force
+        InfoMessage "Copied Sysmon configuration to $($Script:Config.SysmonConfigPath)"
     } else {
         ErrorMessage "Sysmon configuration file not found at $localConfigPath"
         exit 1
@@ -231,9 +231,9 @@ function Configure-Sysmon {
     # Install Sysmon service silently
     InfoMessage "Installing Sysmon service..."
     try {
-        Start-Process -FilePath $global:Config.SysmonExePath `
-            -ArgumentList "-accepteula", "-i", "`"$($global:Config.SysmonConfigPath)`"" `
-            -WorkingDirectory $global:Config.SysmonInstallPath `
+        Start-Process -FilePath $Script:Config.SysmonExePath `
+            -ArgumentList "-accepteula", "-i", "`"$($Script:Config.SysmonConfigPath)`"" `
+            -WorkingDirectory $Script:Config.SysmonInstallPath `
             -NoNewWindow `
             -RedirectStandardOutput "$env:TEMP\sysmon_install.log" `
             -RedirectStandardError "$env:TEMP\sysmon_install_error.log" `
@@ -274,14 +274,14 @@ function Cleanup-TempFiles {
     PrintStep 4 "Cleaning up temporary files"
     
     try {
-        if (Test-Path $global:Config.SysmonZipPath) {
-            Remove-Item -Path $global:Config.SysmonZipPath -Force
-            InfoMessage "Removed temporary file: $($global:Config.SysmonZipPath)"
+        if (Test-Path $Script:Config.SysmonZipPath) {
+            Remove-Item -Path $Script:Config.SysmonZipPath -Force
+            InfoMessage "Removed temporary file: $($Script:Config.SysmonZipPath)"
         }
         
-        if (Test-Path $global:Config.SysmonExtractPath) {
-            Remove-Item -Path $global:Config.SysmonExtractPath -Recurse -Force
-            InfoMessage "Removed temporary directory: $($global:Config.SysmonExtractPath)"
+        if (Test-Path $Script:Config.SysmonExtractPath) {
+            Remove-Item -Path $Script:Config.SysmonExtractPath -Recurse -Force
+            InfoMessage "Removed temporary directory: $($Script:Config.SysmonExtractPath)"
         }
     } catch {
         WarnMessage "Could not clean up temporary files: $_"
@@ -316,9 +316,9 @@ function Install-Sysmon {
     }
 }
 # If the EXE exists but Sysmon service is NOT installed → Clean up the bad install
-if ((Test-Path $global:Config.SysmonExePath) -and -not (Test-SysmonInstalled)) {
+if ((Test-Path $Script:Config.SysmonExePath) -and -not (Test-SysmonInstalled)) {
     WarnMessage "Sysmon files exist but service is not installed. Cleaning up partial installation..."
-    Remove-Item -Path $global:Config.SysmonInstallPath -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $Script:Config.SysmonInstallPath -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # Execute the main installation function

@@ -3,7 +3,7 @@ param (
     [switch]$KeepLogging
 )
 
-$global:Config = @{
+$Script:Config = @{
     TempDir            = "C:\Temp"
     SysmonInstallPath  = "C:\Program Files\Sysmon"
     SysmonExePath      = "C:\Program Files\Sysmon\sysmon64.exe"
@@ -88,10 +88,10 @@ function Uninstall-SysmonService {
     $uninstallSuccess = $false
     
     # Try to uninstall using sysmon from installation path
-    if (Test-Path $global:Config.SysmonExePath) {
+    if (Test-Path $Script:Config.SysmonExePath) {
         InfoMessage "Uninstalling Sysmon using installed executable..."
         try {
-            $process = Start-Process -FilePath $global:Config.SysmonExePath -ArgumentList "-u" -Wait -NoNewWindow -PassThru
+            $process = Start-Process -FilePath $Script:Config.SysmonExePath -ArgumentList "-u" -Wait -NoNewWindow -PassThru
             if ($process.ExitCode -eq 0) {
                 InfoMessage "Sysmon uninstalled successfully!"
                 $uninstallSuccess = $true
@@ -138,22 +138,22 @@ function Uninstall-SysmonService {
 function Remove-SysmonInstallation {
     PrintStep 2 "Removing Sysmon installation directory"
     
-    if (Test-Path $global:Config.SysmonInstallPath) {
+    if (Test-Path $Script:Config.SysmonInstallPath) {
         try {
             # Check if the directory is accessible
-            $acl = Get-Acl -Path $global:Config.SysmonInstallPath -ErrorAction SilentlyContinue
+            $acl = Get-Acl -Path $Script:Config.SysmonInstallPath -ErrorAction SilentlyContinue
             if ($acl) {
-                Remove-Item -Path $global:Config.SysmonInstallPath -Recurse -Force
-                InfoMessage "Removed Sysmon installation directory: $($global:Config.SysmonInstallPath)"
+                Remove-Item -Path $Script:Config.SysmonInstallPath -Recurse -Force
+                InfoMessage "Removed Sysmon installation directory: $($Script:Config.SysmonInstallPath)"
             } else {
                 WarnMessage "Cannot access Sysmon installation directory. It might be in use or protected."
             }
         } catch {
             ErrorMessage "Failed to remove Sysmon installation directory: $_"
-            WarnMessage "You may need to manually remove the directory: $($global:Config.SysmonInstallPath)"
+            WarnMessage "You may need to manually remove the directory: $($Script:Config.SysmonInstallPath)"
         }
     } else {
-        WarnMessage "Sysmon installation directory not found: $($global:Config.SysmonInstallPath)"
+        WarnMessage "Sysmon installation directory not found: $($Script:Config.SysmonInstallPath)"
     }
 }
 
