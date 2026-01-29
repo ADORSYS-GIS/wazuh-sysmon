@@ -155,14 +155,14 @@ function Show-ChoicePrompt {
         $Global:UserChoice = "dismiss"
 
         $BtnTemp = New-Object System.Windows.Forms.Button
-        $BtnTemp.Text = "Block (60s)"
+        $BtnTemp.Text = "Block Temporarily"
         $BtnTemp.Location = New-Object System.Drawing.Point(20,100)
         $BtnTemp.Size = New-Object System.Drawing.Size(110,40)
         $BtnTemp.Add_Click({ $Global:UserChoice = "temp"; $Form.Close() })
         $Form.Controls.Add($BtnTemp)
 
         $BtnPerm = New-Object System.Windows.Forms.Button
-        $BtnPerm.Text = "Block Permanent"
+        $BtnPerm.Text = "Block Permanently"
         $BtnPerm.Location = New-Object System.Drawing.Point(145,100)
         $BtnPerm.Size = New-Object System.Drawing.Size(120,40)
         $BtnPerm.Add_Click({ $Global:UserChoice = "perm"; $Form.Close() })
