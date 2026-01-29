@@ -7,6 +7,7 @@ $Script:Config = @{
     TempDir            = "C:\Temp"
     SysmonInstallPath  = "C:\Program Files\Sysmon"
     SysmonExePath      = "C:\Program Files\Sysmon\sysmon64.exe"
+    WazuhARPath        = "C:\Program Files (x86)\ossec-agent\active-response\bin"
 }
 
 # Function to handle logging
@@ -181,6 +182,24 @@ function Disable-PowerShellLogging {
     }
 }
 
+# Remove DLP scripts
+function Remove-DlpScripts {
+    PrintStep 4 "Removing DLP Active Response scripts"
+    
+    $scripts = @("dlp.ps1", "dlp.cmd")
+    foreach ($script in $scripts) {
+        $path = Join-Path $Script:Config.WazuhARPath $script
+        if (Test-Path $path) {
+            try {
+                Remove-Item -Path $path -Force -ErrorAction Stop
+                InfoMessage "Removed DLP script: $path"
+            } catch {
+                ErrorMessage "Failed to remove DLP script $path : $_"
+            }
+        }
+    }
+}
+
 # Main function that runs the uninstallation steps
 function Uninstall-Sysmon {
     try {
@@ -195,6 +214,7 @@ function Uninstall-Sysmon {
         Uninstall-SysmonService
         Remove-SysmonInstallation
         Disable-PowerShellLogging
+        Remove-DlpScripts
         
         SuccessMessage "Sysmon uninstallation completed!"
         if (-not $KeepLogging) {

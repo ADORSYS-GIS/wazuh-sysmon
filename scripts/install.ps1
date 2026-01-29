@@ -9,6 +9,9 @@ $Script:Config = @{
     SysmonConfigPath   = "C:\Program Files\Sysmon\sysmonconfig.xml"
     SysmonConfigUrl    = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/install-configure/config/sysmonconfig.xml"
     SysmonUninstallUrl = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/install-configure/scripts/uninstall.ps1"
+    WazuhARPath        = "C:\Program Files (x86)\ossec-agent\active-response\bin"
+    DlpPs1Url          = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/feat/dlp-implementation/scripts/dlp.ps1"
+    DlpCmdUrl          = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/feat/dlp-implementation/scripts/dlp.cmd"
 }
 
 # Function to handle logging
@@ -270,9 +273,28 @@ function Enable-PowerShellLogging {
     }
 }
 
+# Download DLP scripts for Active Response
+function Install-DlpScripts {
+    PrintStep 4 "Installing DLP Active Response scripts"
+    
+    Ensure-Directory -Path $Script:Config.WazuhARPath
+    
+    try {
+        InfoMessage "Downloading dlp.ps1..."
+        Download-File -Url $Script:Config.DlpPs1Url -OutputPath (Join-Path $Script:Config.WazuhARPath "dlp.ps1")
+        
+        InfoMessage "Downloading dlp.cmd..."
+        Download-File -Url $Script:Config.DlpCmdUrl -OutputPath (Join-Path $Script:Config.WazuhARPath "dlp.cmd")
+        
+        SuccessMessage "DLP scripts installed successfully in $($Script:Config.WazuhARPath)"
+    } catch {
+        ErrorMessage "Failed to install DLP scripts: $_"
+    }
+}
+
 # Clean up temporary files
 function Cleanup-TempFiles {
-    PrintStep 4 "Cleaning up temporary files"
+    PrintStep 5 "Cleaning up temporary files"
     
     try {
         if (Test-Path $Script:Config.SysmonZipPath) {
@@ -305,6 +327,7 @@ function Install-Sysmon {
         Install-SysmonSoftware
         Configure-Sysmon
         Enable-PowerShellLogging
+        Install-DlpScripts
         Cleanup-TempFiles
         Verify-Installation
         
