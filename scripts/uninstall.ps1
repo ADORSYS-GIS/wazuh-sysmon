@@ -157,25 +157,16 @@ function Remove-SysmonInstallation {
     }
 }
 
-# Disable Script Block Logging and Module Logging
+# Disable Module Logging
 function Disable-PowerShellLogging {
     if ($KeepLogging) {
         InfoMessage "Skipping Disable-PowerShellLogging as -KeepLogging was specified."
         return
     }
 
-    PrintStep 3 "Disabling PowerShell Script Block and Module Logging"
+    PrintStep 3 "Disabling PowerShell Module Logging"
     
     try {
-        # Disable Script Block Logging
-        InfoMessage "Disabling Script Block Logging..."
-        if (Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging") {
-            Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Name "EnableScriptBlockLogging" -Value 0
-            InfoMessage "Script Block Logging disabled successfully!"
-        } else {
-            InfoMessage "Script Block Logging was not configured."
-        }
-        
         # Disable Module Logging
         InfoMessage "Disabling Module Logging..."
         if (Test-Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging") {
@@ -207,7 +198,7 @@ function Uninstall-Sysmon {
         
         SuccessMessage "Sysmon uninstallation completed!"
         if (-not $KeepLogging) {
-            InfoMessage "PowerShell Script Block and Module Logging have been disabled."
+            InfoMessage "PowerShell Module Logging has been disabled."
         }
     } catch {
         ErrorMessage "Uninstallation failed: $_"

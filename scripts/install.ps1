@@ -252,17 +252,11 @@ function Configure-Sysmon {
     }
 }
 
-# Enable Script Block Logging and Module Logging
+# Enable Module Logging
 function Enable-PowerShellLogging {
-    PrintStep 3 "Enabling PowerShell Script Block and Module Logging"
+    PrintStep 3 "Enabling PowerShell Module Logging"
     
     try {
-        # Enable Script Block Logging
-        InfoMessage "Enabling Script Block Logging..."
-        New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Force | Out-Null
-        Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Name "EnableScriptBlockLogging" -Value 1
-        InfoMessage "Script Block Logging enabled successfully!"
-        
         # Enable Module Logging (optional, more verbose)
         InfoMessage "Enabling Module Logging..."
         New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging" -Force | Out-Null
@@ -316,7 +310,7 @@ function Install-Sysmon {
         
         SuccessMessage "Sysmon installation and configuration completed!"
         InfoMessage "Sysmon is now monitoring Process Creation events for curl, wget, powershell, and pwsh."
-        InfoMessage "PowerShell Script Block and Module Logging have been enabled."
+        InfoMessage "PowerShell Module Logging has been enabled."
     } catch {
         ErrorMessage "Installation failed: $_"
         exit 1
