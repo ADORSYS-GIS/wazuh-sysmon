@@ -22,13 +22,11 @@ This will:
 - Automatically download Sysmon from Microsoft's official site
 - Extract and install Sysmon to "C:\Program Files\Sysmon"
 - Configure Sysmon with the provided configuration file
-- Configure Wazuh to collect Sysmon logs
-- Restart the Wazuh service
 - Clean up temporary files
 
 ## Uninstallation
 
-To uninstall Sysmon and remove the Wazuh configuration:
+To uninstall Sysmon:
 
 1. Run PowerShell as Administrator.
 2. Navigate to the `scripts` directory.
@@ -42,8 +40,6 @@ To uninstall Sysmon and remove the Wazuh configuration:
 This will:
 - Uninstall the Sysmon service
 - Remove the Sysmon installation directory
-- Remove Sysmon configuration from Wazuh
-- Restart the Wazuh service
 
 ## Configuration
 
@@ -53,24 +49,7 @@ The `sysmonconfig.xml` file is configured to monitor Process Creation (Event ID 
 - `powershell.exe`
 - `pwsh.exe`
 
-This allows Wazuh to detect when these tools are used and what arguments are passed to them, which is useful for security monitoring.
-
-## Manual Wazuh Configuration
-
-If the automatic configuration fails, you can manually add the following to your Wazuh configuration file (`C:\Program Files (x86)\ossec-agent\ossec.conf`):
-
-```xml
-<localfile>
-  <location>Microsoft-Windows-Sysmon/Operational</location>
-  <log_format>eventchannel</log_format>
-</localfile>
-```
-
-After adding this configuration, restart the Wazuh service:
-
-```powershell
-Restart-Service WazuhSvc
-```
+This allows Sysmon to detect when these tools are used and what arguments are passed to them, which is useful for security monitoring.
 
 ## Verification
 
@@ -90,8 +69,6 @@ You can also check the Event Viewer under "Applications and Services Logs" > "Mi
    ```powershell
    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
    ```
-
-3. **Wazuh Service Issues**: If the Wazuh service fails to restart, restart it manually from the Services console.
 
 ## Contributing
 Contributions are welcome! Please open an issue or submit a pull request for any improvements or bug fixes.

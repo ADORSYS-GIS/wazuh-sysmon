@@ -1,0 +1,14 @@
+<Sysmon schemaversion="4.82">
+  <HashAlgorithms>md5,sha256</HashAlgorithms>
+  <EventFiltering>
+    <RuleGroup groupRelation="or">
+      <ProcessCreate onmatch="include">
+        <OriginalFileName condition="is">curl.exe</OriginalFileName>
+        <OriginalFileName condition="is">wget.exe</OriginalFileName>
+        <OriginalFileName condition="is">powershell.exe</OriginalFileName>
+        <OriginalFileName condition="is">pwsh.exe</OriginalFileName>
+        <OriginalFileName condition="is">PSCP</OriginalFileName>
+      </ProcessCreate>
+    </RuleGroup>
+  </EventFiltering>
+</Sysmon>
