@@ -212,12 +212,12 @@ function Extract-Destination {
 }
 
 function Block-IP {
-    param([string]$IP, [string]$Source)
+    param([string]$IP, [string]$Source, [string]$UnblockTime)
     # Support both IPv4 dots and IPv6 colons in rule names
     $SanitizedIP = $IP -replace '[\.:]', '-'
     $RuleName = "Wazuh-Block-IP-$($SanitizedIP)"
     
-    Write-Log "Attempting to block IP: $($IP) (Source: $($Source))"
+    Write-Log "Attempting to block IP: $($IP) (Source: $($Source), Unblock: $($UnblockTime))"
     
     # Check if rule already exists
     $ExistingRule = $null
@@ -228,15 +228,19 @@ function Block-IP {
     }
     
     if ($ExistingRule) {
-        Write-Log "Firewall rule already exists for IP: $($IP)"
+        Write-Log "Firewall rule already exists for IP: $($IP). Updating description."
+        try {
+            Set-NetFirewallRule -Name $RuleName -Description "Wazuh blocked $($Source). Unblock time: $($UnblockTime)" -ErrorAction SilentlyContinue
+        } catch {}
         return
     }
     
     try {
-        # Use -Confirm:$false and -WhatIf:$false to prevent any prompts
+        $Description = "Wazuh blocked $($Source). Unblock time: $($UnblockTime)"
         Write-Log "Creating firewall rule: $($RuleName)"
         New-NetFirewallRule -Name $RuleName `
                            -DisplayName "Wazuh Block $($Source): $($IP)" `
+                           -Description $Description `
                            -RemoteAddress $IP `
                            -Action Block `
                            -Direction Outbound `
@@ -283,12 +287,15 @@ function Unblock-IP {
 function Update-Domain {
     param(
         [string]$Domain,
-        [string]$BlockType
+        [string]$BlockType,
+        [string]$UnblockTime,
+        $StateObj = $null
     )
     # Remove brackets from IPv6 literal if present
     $CleanDomain = $Domain -replace '\[|\]', ''
-    Write-Log "Updating IPs for target: $($CleanDomain) (Type: $($BlockType))"
-    $State = Get-State
+    Write-Log "Updating IPs for target: $($CleanDomain) (Type: $($BlockType), Unblock: $($UnblockTime))"
+    
+    $LocalState = if ($StateObj) { $StateObj } else { Get-State }
     $NewIPs = @()
     
     try {
@@ -311,8 +318,8 @@ function Update-Domain {
         # Continue with empty IP list
     }
 
-    $OldIPs = if ($State.domains[$Domain] -and $State.domains[$Domain].ips) { 
-        @($State.domains[$Domain].ips) 
+    $OldIPs = if ($LocalState.domains[$Domain] -and $LocalState.domains[$Domain].ips) { 
+        @($LocalState.domains[$Domain].ips) 
     } else { 
         @() 
     }
@@ -321,29 +328,37 @@ function Update-Domain {
     
     # Block new IPs
     $IPsToBlock = @($NewIPs | Where-Object { $_ -notin $OldIPs })
-    Write-Log "IPs to block: $($IPsToBlock.Count) - $($IPsToBlock -join ', ')"
-    foreach ($IP in $IPsToBlock) { 
-        Block-IP -IP $IP -Source $Domain
+    if ($IPsToBlock.Count -gt 0) {
+        Write-Log "IPs to block: $($IPsToBlock.Count) - $($IPsToBlock -join ', ')"
+        foreach ($IP in $IPsToBlock) { 
+            Block-IP -IP $IP -Source $Domain -UnblockTime $UnblockTime
+        }
     }
     
     # Unblock removed IPs
     $IPsToUnblock = @($OldIPs | Where-Object { $_ -notin $NewIPs })
-    Write-Log "IPs to unblock: $($IPsToUnblock.Count) - $($IPsToUnblock -join ', ')"
-    foreach ($IP in $IPsToUnblock) { 
-        Unblock-IP -IP $IP
+    if ($IPsToUnblock.Count -gt 0) {
+        Write-Log "IPs to unblock: $($IPsToUnblock.Count) - $($IPsToUnblock -join ', ')"
+        foreach ($IP in $IPsToUnblock) { 
+            Unblock-IP -IP $IP
+        }
     }
     
     Write-Log "Updating state with new IP list for domain: $($Domain)"
-    $State.domains[$Domain] = @{
+    $LocalState.domains[$Domain] = @{
         ips = $NewIPs
         type = $BlockType
+        unblockTime = $UnblockTime
     }
-    Save-State $State
+    
+    if (-not $StateObj) {
+        Save-State $LocalState
+    }
     Write-Log "Domain update completed for: $($Domain)"
 }
 
 function Register-PeriodicTask {
-    $TaskName = "Wazuh-Domain-Refresh"
+    $TaskName = "Wazuh-Periodic-Dlp-Refresh"
     if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
         $Action = New-ScheduledTaskAction -Execute "PowerShell.exe" -Argument "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PSCommandPath`" -Refresh"
         $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
@@ -355,7 +370,7 @@ function Register-PeriodicTask {
 }
 
 function Unregister-PeriodicTask {
-    $TaskName = "Wazuh-Domain-Refresh"
+    $TaskName = "Wazuh-Periodic-Dlp-Refresh"
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         try {
             Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
@@ -366,22 +381,81 @@ function Unregister-PeriodicTask {
 
 # ---- Periodic Refresh Mode ----
 if ($Refresh) {
-    Write-Log "Running periodic domain refresh"
-    $State = Get-State
-    
-    $HasDomains = $State.domains -and $State.domains.Count -gt 0
-    
-    if ($HasDomains) {
-        Write-Log "Refreshing $($State.domains.Count) domain(s)"
-        foreach ($Domain in $State.domains.Keys) { 
-            $DomainData = $State.domains[$Domain]
-            $BlockType = if ($DomainData.type) { $DomainData.type } else { "perm" }
-            Update-Domain -Domain $Domain -BlockType $BlockType
+    Write-Log "Running periodic domain refresh and timeout check"
+    try {
+        $State = Get-State
+        $Now = Get-Date
+        $Changed = $false
+
+        # Check IP timeouts
+        if ($State.ips) {
+            $IPKeys = @($State.ips.Keys)
+            Write-Log "Checking timeouts for $($IPKeys.Count) IP(s)"
+            $IPsToDelete = @()
+            foreach ($IP in $IPKeys) {
+                $IPData = $State.ips[$IP]
+                if ($IPData.type -eq "temp" -and $IPData.unblockTime -and $IPData.unblockTime -ne "Never") {
+                    try {
+                        $UnblockTime = [DateTime]$IPData.unblockTime
+                        if ($Now -ge $UnblockTime) {
+                            Write-Log "IP Timeout reached for $($IP) (Scheduled: $($IPData.unblockTime))"
+                            Unblock-IP -IP $IP
+                            $IPsToDelete += $IP
+                            $Changed = $true
+                        } else {
+                            Write-Log "IP $($IP) still blocked until $($IPData.unblockTime)"
+                        }
+                    } catch { Write-Log "Error parsing unblockTime for IP $($IP): $($_.Exception.Message)" }
+                }
+            }
+            foreach ($IP in $IPsToDelete) { $State.ips.Remove($IP) }
         }
-    } else {
-        Write-Log "No domains to refresh, removing periodic task"
-        Unregister-PeriodicTask
+
+        # Refresh domains and check domain timeouts
+        if ($State.domains) {
+            $DomainKeys = @($State.domains.Keys)
+            Write-Log "Checking/Refreshing $($DomainKeys.Count) domain(s)"
+            $DomainsToDelete = @()
+            foreach ($Domain in $DomainKeys) {
+                $DomainData = $State.domains[$Domain]
+                if ($DomainData.type -eq "temp" -and $DomainData.unblockTime -and $DomainData.unblockTime -ne "Never") {
+                    try {
+                        $UnblockTime = [DateTime]$DomainData.unblockTime
+                        if ($Now -ge $UnblockTime) {
+                            Write-Log "Domain Timeout reached for $($Domain) (Scheduled: $($DomainData.unblockTime))"
+                            if ($DomainData.ips) {
+                                foreach ($IP in $DomainData.ips) { Unblock-IP -IP $IP }
+                            }
+                            $DomainsToDelete += $Domain
+                            $Changed = $true
+                            continue
+                        } else {
+                            Write-Log "Domain $($Domain) still blocked until $($DomainData.unblockTime)"
+                        }
+                    } catch { Write-Log "Error parsing unblockTime for Domain $($Domain): $($_.Exception.Message)" }
+                }
+                # If not timed out, update/refresh IPs
+                $BlockType = if ($DomainData.type) { $DomainData.type } else { "perm" }
+                Update-Domain -Domain $Domain -BlockType $BlockType -UnblockTime $DomainData.unblockTime -StateObj $State
+                $Changed = $true # Update-Domain modifies state
+            }
+            foreach ($Domain in $DomainsToDelete) { $State.domains.Remove($Domain) }
+        }
+
+        if ($Changed) { Save-State $State }
+        
+        $HasActiveDomains = $State.domains -and $State.domains.Count -gt 0
+        $HasActiveIPs = $State.ips -and $State.ips.Count -gt 0
+        
+        if (-not $HasActiveDomains -and -not $HasActiveIPs) {
+            Write-Log "No more active blocks, removing periodic task"
+            Unregister-PeriodicTask
+        }
+    } catch {
+        Write-Log "CRITICAL error in periodic refresh: $($_.Exception.Message)"
+        Write-Log "Stack trace: $($_.ScriptStackTrace)"
     }
+    Write-Log "Periodic refresh cycle completed"
     exit 0
 }
 
@@ -445,25 +519,28 @@ try {
                     Remove-Item $ResponseFile -ErrorAction SilentlyContinue
                     
                     if ($Choice -eq "temp" -or $Choice -eq "perm") {
-                        Write-Log "Applying $($Choice) block for $($Target)"
+                        $UnblockTime = if ($Choice -eq "temp") { (Get-Date).AddMinutes(30).ToString("yyyy-MM-dd HH:mm:ss") } else { "Never" }
+                        Write-Log "Applying $($Choice) block for $($Target) (Unblock: $($UnblockTime))"
                         
                         if ([System.Net.IPAddress]::TryParse($Target, [ref]$null)) {
                             # Direct IP block
                             Write-Log "Target is direct IP: $($Target)"
-                            Block-IP -IP $Target -Source "IP-User-$($Choice)"
+                            Block-IP -IP $Target -Source "IP-User-$($Choice)" -UnblockTime $UnblockTime
                             $State = Get-State
                             $State.ips[$Target] = @{
                                 type = $Choice
+                                unblockTime = $UnblockTime
                             }
                             Save-State $State
+                            Register-PeriodicTask
                         } else {
                             # Domain block - save to state with block type
                             Write-Log "Target is domain: $($Target)"
-                            Update-Domain -Domain $Target -BlockType $Choice
+                            Update-Domain -Domain $Target -BlockType $Choice -UnblockTime $UnblockTime
                             Register-PeriodicTask
                         }
                         
-                        Write-Log "Block applied successfully (Wazuh will send delete after timeout for temp blocks)"
+                        Write-Log "Block applied successfully (Self-unblocking scheduled for temp blocks)"
                     } else {
                         Write-Log "User dismissed alert for $($Target)"
                     }
@@ -481,53 +558,6 @@ try {
             }
         } else {
             Write-Log "No logged in user found to show prompt"
-        }
-    } elseif ($Command -eq "delete") {
-        Write-Log "Unblock request for $($Target)"
-        $State = Get-State
-        
-        # Check if target is an IP in the ips section
-        $TargetData = $null
-        $IsDirectIP = $false
-        
-        if ($State.ips[$Target]) {
-            $TargetData = $State.ips[$Target]
-            $IsDirectIP = $true
-        } elseif ($State.domains[$Target]) {
-            $TargetData = $State.domains[$Target]
-        }
-        
-        if ($TargetData) {
-            $BlockType = if ($TargetData.type) { $TargetData.type } else { "perm" }
-            
-            if ($BlockType -eq "perm") {
-                Write-Log "BLOCKED: $($Target) has permanent block - ignoring unblock request"
-            } else {
-                Write-Log "Unblocking temporary block for $($Target)"
-                
-                if ($IsDirectIP) {
-                    Unblock-IP -IP $Target
-                    $State.ips.Remove($Target)
-                } else {
-                    # Unblock all IPs associated with domain
-                    $IPsToUnblock = if ($TargetData.ips) { @($TargetData.ips) } else { @() }
-                    Write-Log "Unblocking $($IPsToUnblock.Count) IP(s) for domain $($Target)"
-                    foreach ($IP in $IPsToUnblock) {
-                        Unblock-IP -IP $IP
-                    }
-                    $State.domains.Remove($Target)
-                }
-                
-                Save-State $State
-                
-                # If no domains remain, remove the periodic refresh task
-                if ($State.domains.Count -eq 0) {
-                    Write-Log "No domains remaining after unblock"
-                    Unregister-PeriodicTask
-                }
-            }
-        } else {
-            Write-Log "Target $($Target) not found in state (checked IPs and Domains)."
         }
     }
 } catch { 
