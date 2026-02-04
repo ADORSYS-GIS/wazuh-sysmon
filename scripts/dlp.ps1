@@ -20,7 +20,7 @@ if ($BaseDir -match '\\bin$|/bin$') {
     $BaseDir = Split-Path -Parent $BaseDir
 }
 
-$LogFile = Join-Path $BaseDir "active-responses-test.log"
+$LogFile = Join-Path $BaseDir "active-responses-dlp.log"
 $StatesDir = Join-Path $BaseDir "states"
 
 if (-not (Test-Path $StatesDir)) {
