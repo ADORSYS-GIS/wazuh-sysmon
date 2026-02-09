@@ -338,7 +338,7 @@ function Install-SuricataRules {
         Copy-Item -Path $Script:Config.SuricataYamlPath -Destination "$($Script:Config.SuricataYamlPath).bak" -Force
         InfoMessage "Backed up Suricata configuration to $($Script:Config.SuricataYamlPath).bak"
     } catch {
-        WarnMessage "Failed to backup Suricata configuration: $_"
+        WarnMessage "Fairule-filesled to backup Suricata configuration: $_"
     }
 
     # Download rules
@@ -357,41 +357,50 @@ function Install-SuricataRules {
     
     try {
         $yamlContent = Get-Content $Script:Config.SuricataYamlPath -Raw
-        
+
         if ($yamlContent -match "suricata-exfiltration.rules") {
             InfoMessage "Suricata rules already configured in suricata.yaml"
             return
         }
-        
+
         if ($useYamlModule) {
-            # Use powershell-yaml module for robust parsing
             InfoMessage "Using powershell-yaml module for YAML configuration..."
-            
+
+            # Parse YAML
             $config = ConvertFrom-Yaml $yamlContent
             $ruleName = "suricata-exfiltration.rules"
-            
-            # Check if rule-files section exists
+
+            # Ensure 'rule-files' exists and is a list
             if (-not $config.ContainsKey('rule-files')) {
                 $config['rule-files'] = @()
                 WarnMessage "'rule-files' section created in suricata.yaml"
-            }
-            
-            # Ensure it's an array
-            if ($config['rule-files'] -isnot [System.Collections.IList]) {
+            } elseif ($config['rule-files'] -isnot [System.Collections.IList]) {
                 $config['rule-files'] = @($config['rule-files'])
             }
-            
-            # Add rule if not present
+
+            # Add the rule if not already present
             if ($config['rule-files'] -notcontains $ruleName) {
                 $config['rule-files'] += $ruleName
-                
-                # Convert back to YAML and save
-                $newYamlContent = ConvertTo-Yaml $config
-                $newYamlContent | Set-Content $Script:Config.SuricataYamlPath -NoNewline
-                
-                SuccessMessage "Updated Suricata configuration with exfiltration rules using YAML parser."
+
+                try {
+                    # Convert back to YAML and save
+                    $config | ConvertTo-Yaml | Out-File $Script:Config.SuricataYamlPath -Encoding utf8
+                    SuccessMessage "Updated Suricata configuration with exfiltration rules using YAML parser."
+                } catch {
+                    Write-Error "Failed to save updated suricata.yaml: $_"
+                }
+            } else {
+                InfoMessage "Rule already exists in 'rule-files'. No changes made."
             }
         } else {
+            # Fallback: simple text append
+            Add-Content -Path $Script:Config.SuricataYamlPath -Value $ruleName
+            SuccessMessage "Appended rule to suricata.yaml using plain text."
+        }
+
+    } catch {
+        Write-Error "Error updating suricata.yaml: $_"
+    } else {
             # Fallback to regex-based approach
             InfoMessage "Using regex fallback for YAML configuration..."
             
