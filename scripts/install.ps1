@@ -370,15 +370,23 @@ function Install-SuricataRules {
             $config = ConvertFrom-Yaml $yamlContent
             $ruleName = "suricata-exfiltration.rules"
             
+            if (-not $config.ContainsKey('rule-files') -or -not ($config.'rule-files' -is [System.Collections.IList])) {
+                $config.'rule-files' = @()
+            }
+
             # Add rule if not present
-            if ($config['rule-files'] -notcontains $ruleName) {
-                $config['rule-files'] += $ruleName
+            if ($config.'rule-files' -notcontains $ruleName) {
+                $config.'rule-files' += $ruleName
                 
                 # Convert back to YAML and save
-                $newYamlContent = ConvertTo-Yaml $config
-                $newYamlContent | Set-Content $Script:Config.SuricataYamlPath -NoNewline
-                
-                SuccessMessage "Updated Suricata configuration with exfiltration rules using YAML parser."
+                try {
+                    $newYamlContent = ConvertTo-Yaml $config
+                    $newYamlContent | Set-Content -Path $Script:Config.SuricataYamlPath
+                    
+                    SuccessMessage "Updated Suricata configuration with exfiltration rules using YAML parser."
+                } catch {
+                    ErrorMessage "Failed to write updated YAML configuration: $_"
+                }
             }
         } else {
             # Fallback to regex-based approach
