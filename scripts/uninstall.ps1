@@ -8,6 +8,8 @@ $Script:Config = @{
     SysmonInstallPath  = "C:\Program Files\Sysmon"
     SysmonExePath      = "C:\Program Files\Sysmon\sysmon64.exe"
     WazuhARPath        = "C:\Program Files (x86)\ossec-agent\active-response\bin"
+    SuricataYamlPath   = "C:\Program Files (x86)\ossec-agent\suricata\suricata.yaml"
+    SuricataRulesDir   = "C:\Program Files (x86)\ossec-agent\suricata\rules"
 }
 
 # Function to handle logging
@@ -200,6 +202,47 @@ function Remove-DlpScripts {
     }
 }
 
+# Remove Suricata rules
+function Remove-SuricataRules {
+    PrintStep 5 "Removing Suricata Rules"
+    
+    $rulePath = Join-Path $Script:Config.SuricataRulesDir "suricata-exfiltration.rules"
+    if (Test-Path $rulePath) {
+        try {
+            Remove-Item -Path $rulePath -Force
+            InfoMessage "Removed Suricata rule file: $rulePath"
+        } catch {
+            WarnMessage "Failed to remove Suricata rule file: $_"
+        }
+    }
+
+    if (Test-Path $Script:Config.SuricataYamlPath) {
+        try {
+            $yamlContent = Get-Content $Script:Config.SuricataYamlPath -Raw
+            if ($yamlContent -match "\s*- suricata-exfiltration.rules") {
+                # Remove the line
+                $newYamlContent = $yamlContent -replace "\r?\n\s*- suricata-exfiltration.rules", ""
+                $newYamlContent | Set-Content $Script:Config.SuricataYamlPath
+                SuccessMessage "Removed exfiltration rules from Suricata configuration."
+            }
+        } catch {
+            WarnMessage "Failed to update Suricata configuration: $_"
+        }
+    }
+
+    # Restart Suricata (Scheduled Task)
+    try {
+        $suricataTask = Get-ScheduledTask -TaskName "SuricataStartup" -ErrorAction SilentlyContinue
+        if ($suricataTask) {
+            Stop-ScheduledTask -TaskName "SuricataStartup" -ErrorAction SilentlyContinue
+            Start-ScheduledTask -TaskName "SuricataStartup"
+            SuccessMessage "Restarted Suricata via scheduled task 'SuricataStartup'."
+        }
+    } catch {
+        WarnMessage "Failed to restart Suricata scheduled task: $_"
+    }
+}
+
 # Main function that runs the uninstallation steps
 function Uninstall-Sysmon {
     try {
@@ -215,6 +258,7 @@ function Uninstall-Sysmon {
         Remove-SysmonInstallation
         Disable-PowerShellLogging
         Remove-DlpScripts
+        Remove-SuricataRules
         
         SuccessMessage "Sysmon uninstallation completed!"
         if (-not $KeepLogging) {
