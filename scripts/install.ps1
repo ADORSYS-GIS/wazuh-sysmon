@@ -357,50 +357,30 @@ function Install-SuricataRules {
     
     try {
         $yamlContent = Get-Content $Script:Config.SuricataYamlPath -Raw
-
+        
         if ($yamlContent -match "suricata-exfiltration.rules") {
             InfoMessage "Suricata rules already configured in suricata.yaml"
             return
         }
-
+        
         if ($useYamlModule) {
+            # Use powershell-yaml module for robust parsing
             InfoMessage "Using powershell-yaml module for YAML configuration..."
-
-            # Parse YAML
+            
             $config = ConvertFrom-Yaml $yamlContent
             $ruleName = "suricata-exfiltration.rules"
-
-            # Ensure 'rule-files' exists and is a list
-            if (-not $config.ContainsKey('rule-files')) {
-                $config['rule-files'] = @()
-                WarnMessage "'rule-files' section created in suricata.yaml"
-            } elseif ($config['rule-files'] -isnot [System.Collections.IList]) {
-                $config['rule-files'] = @($config['rule-files'])
-            }
-
-            # Add the rule if not already present
+            
+            # Add rule if not present
             if ($config['rule-files'] -notcontains $ruleName) {
                 $config['rule-files'] += $ruleName
-
-                try {
-                    # Convert back to YAML and save
-                    $config | ConvertTo-Yaml | Out-File $Script:Config.SuricataYamlPath -Encoding utf8
-                    SuccessMessage "Updated Suricata configuration with exfiltration rules using YAML parser."
-                } catch {
-                    Write-Error "Failed to save updated suricata.yaml: $_"
-                }
-            } else {
-                InfoMessage "Rule already exists in 'rule-files'. No changes made."
+                
+                # Convert back to YAML and save
+                $newYamlContent = ConvertTo-Yaml $config
+                $newYamlContent | Set-Content $Script:Config.SuricataYamlPath -NoNewline
+                
+                SuccessMessage "Updated Suricata configuration with exfiltration rules using YAML parser."
             }
         } else {
-            # Fallback: simple text append
-            Add-Content -Path $Script:Config.SuricataYamlPath -Value $ruleName
-            SuccessMessage "Appended rule to suricata.yaml using plain text."
-        }
-
-    } catch {
-        Write-Error "Error updating suricata.yaml: $_"
-    } else {
             # Fallback to regex-based approach
             InfoMessage "Using regex fallback for YAML configuration..."
             
