@@ -8,8 +8,8 @@ $Script:Config = @{
     SysmonInstallPath  = "C:\Program Files\Sysmon"
     SysmonExePath      = "C:\Program Files\Sysmon\sysmon64.exe"
     WazuhARPath        = "C:\Program Files (x86)\ossec-agent\active-response\bin"
-    SuricataYamlPath   = "C:\Program Files (x86)\ossec-agent\suricata\suricata.yaml"
-    SuricataRulesDir   = "C:\Program Files (x86)\ossec-agent\suricata\rules"
+    SuricataYamlPath   = "C:\Program Files\Suricata\suricata.yaml"
+    SuricataRulesDir   = "C:\Program Files\Suricata\rules"
 }
 
 # Function to handle logging

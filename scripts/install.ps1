@@ -12,8 +12,8 @@ $Script:Config = @{
     WazuhARPath        = "C:\Program Files (x86)\ossec-agent\active-response\bin"
     DlpPs1Url          = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/feat/dlp-implementation/scripts/dlp.ps1"
     DlpCmdUrl          = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/feat/dlp-implementation/scripts/dlp.cmd"
-    SuricataYamlPath   = "C:\Program Files\ossec-agent\suricata\suricata.yaml"
-    SuricataRulesDir   = "C:\Program Files\ossec-agent\suricata\rules"
+    SuricataYamlPath   = "C:\Program Files\Suricata\suricata.yaml"
+    SuricataRulesDir   = "C:\Program Files\Suricata\rules"
     SuricataRuleUrl    = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-auditd/refs/heads/feat/DLP/config/suricata-exfiltration.rules"
 }
 
