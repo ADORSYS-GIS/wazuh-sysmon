@@ -64,6 +64,16 @@ function Test-SysmonInstalled {
     return $false
 }
 
+# Check if powershell-yaml module is available
+function Test-PowerShellYaml {
+    try {
+        Import-Module powershell-yaml -ErrorAction Stop
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 # Remove Sysmon Registry Keys (Fallback)
 function Remove-SysmonRegistry {
     PrintStep "1b" "Removing Sysmon Registry Keys manually"
@@ -216,18 +226,68 @@ function Remove-SuricataRules {
         }
     }
 
-    if (Test-Path $Script:Config.SuricataYamlPath) {
-        try {
-            $yamlContent = Get-Content $Script:Config.SuricataYamlPath -Raw
-            if ($yamlContent -match "\s*- suricata-exfiltration.rules") {
-                # Remove the line
-                $newYamlContent = $yamlContent -replace "\r?\n\s*- suricata-exfiltration.rules", ""
-                $newYamlContent | Set-Content $Script:Config.SuricataYamlPath
-                SuccessMessage "Removed exfiltration rules from Suricata configuration."
-            }
-        } catch {
-            WarnMessage "Failed to update Suricata configuration: $_"
+    if (-Not (Test-Path $Script:Config.SuricataYamlPath)) {
+        InfoMessage "Suricata configuration file not found. Skipping YAML cleanup."
+        return
+    }
+
+    # Try to use powershell-yaml module for robust removal
+    $useYamlModule = Test-PowerShellYaml
+    
+    try {
+        $yamlContent = Get-Content $Script:Config.SuricataYamlPath -Raw
+        $ruleName = "suricata-exfiltration.rules"
+        
+        if ($yamlContent -notmatch [regex]::Escape($ruleName)) {
+            InfoMessage "Suricata exfiltration rules not found in configuration."
+            return
         }
+        
+        if ($useYamlModule) {
+            # Use powershell-yaml module for robust parsing
+            InfoMessage "Using powershell-yaml module for YAML cleanup..."
+            
+            $config = ConvertFrom-Yaml $yamlContent
+            
+            # Check if rule-files section exists
+            if ($config.ContainsKey('rule-files')) {
+                # Ensure it's an array
+                if ($config['rule-files'] -is [System.Collections.IList]) {
+                    # Remove the rule if present
+                    if ($config['rule-files'] -contains $ruleName) {
+                        $config['rule-files'] = @($config['rule-files'] | Where-Object { $_ -ne $ruleName })
+                        
+                        # Convert back to YAML and save
+                        $newYamlContent = ConvertTo-Yaml $config
+                        $newYamlContent | Set-Content $Script:Config.SuricataYamlPath -NoNewline
+                        
+                        SuccessMessage "Removed exfiltration rules from Suricata configuration using YAML parser."
+                    }
+                } else {
+                    # Single value, check and remove entire key if it matches
+                    if ($config['rule-files'] -eq $ruleName) {
+                        $config.Remove('rule-files')
+                        
+                        $newYamlContent = ConvertTo-Yaml $config
+                        $newYamlContent | Set-Content $Script:Config.SuricataYamlPath -NoNewline
+                        
+                        SuccessMessage "Removed exfiltration rules from Suricata configuration using YAML parser."
+                    }
+                }
+            }
+        } else {
+            # Fallback to regex-based approach
+            InfoMessage "Using regex fallback for YAML cleanup..."
+            
+            # Remove the line containing the rule
+            $newYamlContent = $yamlContent -replace "\r?\n\s*-\s*$([regex]::Escape($ruleName))", ""
+            $newYamlContent | Set-Content $Script:Config.SuricataYamlPath -NoNewline
+            
+            SuccessMessage "Removed exfiltration rules from Suricata configuration."
+        }
+    } catch {
+        WarnMessage "Failed to update Suricata configuration: $_"
+        WarnMessage "You may need to manually remove 'suricata-exfiltration.rules' from the rule-files section."
     }
 
     # Restart Suricata (Scheduled Task)
