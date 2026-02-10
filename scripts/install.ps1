@@ -97,26 +97,6 @@ function Test-SysmonInstalled {
     return $false
 }
 
-# Ensure powershell-yaml module is installed
-function Ensure-PowerShellYaml {
-    try {
-        Import-Module powershell-yaml -ErrorAction Stop
-        return $true
-    } catch {
-        InfoMessage "powershell-yaml module not found. Installing..."
-        try {
-            Install-Module -Name powershell-yaml -Scope CurrentUser -Force -ErrorAction Stop
-            Import-Module powershell-yaml -ErrorAction Stop
-            SuccessMessage "powershell-yaml module installed successfully."
-            return $true
-        } catch {
-            WarnMessage "Failed to install powershell-yaml module: $_"
-            WarnMessage "Falling back to regex-based YAML parsing (less reliable)."
-            return $false
-        }
-    }
-}
-
 # Download and extract Sysmon
 function Install-SysmonSoftware {
     PrintStep 1 "Downloading and installing Sysmon"
@@ -351,9 +331,6 @@ function Install-SuricataRules {
         ErrorMessage "Failed to download Suricata rules: $_"
         return
     }
-
-    # Update suricata.yaml using powershell-yaml
-    $useYamlModule = Ensure-PowerShellYaml
     
     try {
         $yamlContent = Get-Content $Script:Config.SuricataYamlPath -Raw
@@ -363,58 +340,26 @@ function Install-SuricataRules {
             return
         }
         
-        if ($useYamlModule) {
-            # Use powershell-yaml module for robust parsing
-            InfoMessage "Using powershell-yaml module for YAML configuration..."
+        # Find the rule-files section and add the new rule
+        if ($yamlContent -match '(?sm)(rule-files:\s*\n)((?:- .+\n)+)') {
+            $newRule = " - suricata-exfiltration.rules`n"
+            $updatedContent = $yamlContent -replace '(?sm)(rule-files:\s*\n)((?:- .+\n)+)', "`$1`$2$newRule"
             
-            $config = ConvertFrom-Yaml $yamlContent
-            $ruleName = "suricata-exfiltration.rules"
+            $updatedContent | Set-Content -Path $Script:Config.SuricataYamlPath -NoNewline
+            SuccessMessage "Updated Suricata configuration with exfiltration rules."
+        } elseif ($yamlContent -match '(?sm)rule-files:\s*\n') {
+            # rule-files exists but is empty
+            $newRule = " - suricata-exfiltration.rules`n"
+            $updatedContent = $yamlContent -replace '(?sm)(rule-files:\s*\n)', "`$1$newRule"
             
-            if (-not $config.ContainsKey('rule-files') -or -not ($config.'rule-files' -is [System.Collections.IList])) {
-                $config.'rule-files' = @()
-            }
-
-            # Add rule if not present
-            if ($config.'rule-files' -notcontains $ruleName) {
-                $config.'rule-files' += $ruleName
-                
-                # Convert back to YAML and save
-                try {
-                    $newYamlContent = ConvertTo-Yaml $config
-                    $newYamlContent | Set-Content -Path $Script:Config.SuricataYamlPath
-                    
-                    SuccessMessage "Updated Suricata configuration with exfiltration rules using YAML parser."
-                } catch {
-                    ErrorMessage "Failed to write updated YAML configuration: $_"
-                }
-            }
+            $updatedContent | Set-Content -Path $Script:Config.SuricataYamlPath -NoNewline
+            SuccessMessage "Updated Suricata configuration with exfiltration rules."
         } else {
-            # Fallback to regex-based approach
-            InfoMessage "Using regex fallback for YAML configuration..."
-            
-            if ($yamlContent -match "(?m)^rule-files:") {
-                # Detect line ending style
-                $lineEnding = if ($yamlContent -match "\r\n") { "`r`n" } else { "`n" }
-                
-                # Detect indentation from existing entries or use default
-                $indent = "  "
-                if ($yamlContent -match "(?m)^rule-files:\s*$lineEnding(\s+)-\s") {
-                    $indent = $matches[1]
-                }
-                
-                # Add rule after rule-files: line
-                $newYamlContent = $yamlContent -replace "(?m)^(rule-files:.*)$", 
-                    "`$1$lineEnding$indent- suricata-exfiltration.rules"
-                
-                $newYamlContent | Set-Content $Script:Config.SuricataYamlPath -NoNewline
-                SuccessMessage "Updated Suricata configuration with exfiltration rules."
-            } else {
-                WarnMessage "Could not find 'rule-files' section in suricata.yaml. Manual configuration may be required."
-            }
+            SuccessMessage "Could not find rule-files section in suricata.yaml"
         }
+        
     } catch {
         ErrorMessage "Failed to update Suricata configuration: $_"
-        WarnMessage "You may need to manually add 'suricata-exfiltration.rules' to the rule-files section."
     }
 
     # Restart Suricata (Scheduled Task)
