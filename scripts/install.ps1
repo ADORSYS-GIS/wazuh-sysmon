@@ -9,6 +9,12 @@ $Script:Config = @{
     SysmonConfigPath   = "C:\Program Files\Sysmon\sysmonconfig.xml"
     SysmonConfigUrl    = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/install-configure/config/sysmonconfig.xml"
     SysmonUninstallUrl = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/install-configure/scripts/uninstall.ps1"
+    WazuhARPath        = "C:\Program Files (x86)\ossec-agent\active-response\bin"
+    DlpPs1Url          = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/feat/dlp-implementation/scripts/dlp.ps1"
+    DlpCmdUrl          = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-sysmon/refs/heads/feat/dlp-implementation/scripts/dlp.cmd"
+    SuricataYamlPath   = "C:\Program Files\Suricata\suricata.yaml"
+    SuricataRulesDir   = "C:\Program Files\Suricata\rules"
+    SuricataRuleUrl    = "https://raw.githubusercontent.com/ADORSYS-GIS/wazuh-auditd/refs/heads/feat/DLP/config/suricata-exfiltration.rules"
 }
 
 # Function to handle logging
@@ -91,7 +97,6 @@ function Test-SysmonInstalled {
     return $false
 }
 
-
 # Download and extract Sysmon
 function Install-SysmonSoftware {
     PrintStep 1 "Downloading and installing Sysmon"
@@ -154,10 +159,10 @@ function Uninstall-ExistingSysmon {
 }
 
 function Verify-Installation {
-    PrintStep 5 "Verifying Sysmon Installation"
+    PrintStep 7 "Verifying Installation"
     $verificationFailed = $false
 
-    # 1. Check Service
+    # 1. Check Sysmon Service
     $service = Get-Service -Name "Sysmon64" -ErrorAction SilentlyContinue
     if ($service -and $service.Status -eq 'Running') {
         SuccessMessage "Verification: Sysmon64 service is running."
@@ -181,11 +186,21 @@ function Verify-Installation {
         ErrorMessage "Verification: Sysmon64 registry key missing."
         $verificationFailed = $true
     }
+
+    # 4. Check Suricata configuration
+    if (Test-Path $Script:Config.SuricataYamlPath) {
+        $content = Get-Content $Script:Config.SuricataYamlPath -Raw
+        if ($content -match "suricata-exfiltration.rules") {
+            SuccessMessage "Verification: Suricata rules for exfiltration are configured."
+        } else {
+            WarnMessage "Verification: Suricata rules for exfiltration are NOT configured in suricata.yaml."
+        }
+    }
     
     if ($verificationFailed) {
         throw "Sysmon verification failed. Please check the logs."
     } else {
-        SuccessMessage "All verification checks passed!"
+        SuccessMessage "All verification checks completed!"
     }
 }
 
@@ -270,9 +285,101 @@ function Enable-PowerShellLogging {
     }
 }
 
+# Download DLP scripts for Active Response
+function Install-DlpScripts {
+    PrintStep 4 "Installing DLP Active Response scripts"
+    
+    Ensure-Directory -Path $Script:Config.WazuhARPath
+    
+    try {
+        InfoMessage "Downloading dlp.ps1..."
+        Download-File -Url $Script:Config.DlpPs1Url -OutputPath (Join-Path $Script:Config.WazuhARPath "dlp.ps1")
+        
+        InfoMessage "Downloading dlp.cmd..."
+        Download-File -Url $Script:Config.DlpCmdUrl -OutputPath (Join-Path $Script:Config.WazuhARPath "dlp.cmd")
+        
+        SuccessMessage "DLP scripts installed successfully in $($Script:Config.WazuhARPath)"
+    } catch {
+        ErrorMessage "Failed to install DLP scripts: $_"
+    }
+}
+
+# Install Suricata rules for exfiltration detection
+function Install-SuricataRules {
+    PrintStep 5 "Installing Suricata Rules for Exfiltration Detection"
+    
+    if (-Not (Test-Path $Script:Config.SuricataYamlPath)) {
+        WarnMessage "Suricata configuration file not found at $($Script:Config.SuricataYamlPath). Skipping Suricata configuration."
+        return
+    }
+
+    # Backup configuration
+    try {
+        Copy-Item -Path $Script:Config.SuricataYamlPath -Destination "$($Script:Config.SuricataYamlPath).bak" -Force
+        InfoMessage "Backed up Suricata configuration to $($Script:Config.SuricataYamlPath).bak"
+    } catch {
+        WarnMessage "Fairule-filesled to backup Suricata configuration: $_"
+    }
+
+    # Download rules
+    Ensure-Directory -Path $Script:Config.SuricataRulesDir
+    $rulePath = Join-Path $Script:Config.SuricataRulesDir "suricata-exfiltration.rules"
+    try {
+        Download-File -Url $Script:Config.SuricataRuleUrl -OutputPath $rulePath
+        InfoMessage "Downloaded Suricata rules to $rulePath"
+    } catch {
+        ErrorMessage "Failed to download Suricata rules: $_"
+        return
+    }
+    
+    try {
+        $yamlContent = Get-Content $Script:Config.SuricataYamlPath -Raw
+        
+        if ($yamlContent -match "suricata-exfiltration.rules") {
+            InfoMessage "Suricata rules already configured in suricata.yaml"
+            return
+        }
+        
+        # Find the rule-files section and add the new rule
+        if ($yamlContent -match '(?sm)(rule-files:\s*\n)((?:- .+\n)+)') {
+            $newRule = " - suricata-exfiltration.rules`n"
+            $updatedContent = $yamlContent -replace '(?sm)(rule-files:\s*\n)((?:- .+\n)+)', "`$1`$2$newRule"
+            
+            $updatedContent | Set-Content -Path $Script:Config.SuricataYamlPath -NoNewline
+            SuccessMessage "Updated Suricata configuration with exfiltration rules."
+        } elseif ($yamlContent -match '(?sm)rule-files:\s*\n') {
+            # rule-files exists but is empty
+            $newRule = " - suricata-exfiltration.rules`n"
+            $updatedContent = $yamlContent -replace '(?sm)(rule-files:\s*\n)', "`$1$newRule"
+            
+            $updatedContent | Set-Content -Path $Script:Config.SuricataYamlPath -NoNewline
+            SuccessMessage "Updated Suricata configuration with exfiltration rules."
+        } else {
+            SuccessMessage "Could not find rule-files section in suricata.yaml"
+        }
+        
+    } catch {
+        ErrorMessage "Failed to update Suricata configuration: $_"
+    }
+
+    # Restart Suricata (Scheduled Task)
+    try {
+        $suricataTask = Get-ScheduledTask -TaskName "SuricataStartup" -ErrorAction SilentlyContinue
+        if ($suricataTask) {
+            Stop-ScheduledTask -TaskName "SuricataStartup" -ErrorAction SilentlyContinue
+            Start-ScheduledTask -TaskName "SuricataStartup"
+            SuccessMessage "Restarted Suricata via scheduled task 'SuricataStartup'."
+        } else {
+            WarnMessage "Suricata scheduled task 'SuricataStartup' not found. Please restart it manually if needed."
+        }
+    } catch {
+        WarnMessage "Failed to restart Suricata scheduled task: $_"
+    }
+}
+
 # Clean up temporary files
 function Cleanup-TempFiles {
-    PrintStep 4 "Cleaning up temporary files"
+    PrintStep 6 "Cleaning up temporary files"
     
     try {
         if (Test-Path $Script:Config.SysmonZipPath) {
@@ -305,6 +412,8 @@ function Install-Sysmon {
         Install-SysmonSoftware
         Configure-Sysmon
         Enable-PowerShellLogging
+        Install-DlpScripts
+        Install-SuricataRules
         Cleanup-TempFiles
         Verify-Installation
         

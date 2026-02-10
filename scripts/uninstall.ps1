@@ -7,6 +7,9 @@ $Script:Config = @{
     TempDir            = "C:\Temp"
     SysmonInstallPath  = "C:\Program Files\Sysmon"
     SysmonExePath      = "C:\Program Files\Sysmon\sysmon64.exe"
+    WazuhARPath        = "C:\Program Files (x86)\ossec-agent\active-response\bin"
+    SuricataYamlPath   = "C:\Program Files\Suricata\suricata.yaml"
+    SuricataRulesDir   = "C:\Program Files\Suricata\rules"
 }
 
 # Function to handle logging
@@ -181,6 +184,76 @@ function Disable-PowerShellLogging {
     }
 }
 
+# Remove DLP scripts
+function Remove-DlpScripts {
+    PrintStep 4 "Removing DLP Active Response scripts"
+    
+    $scripts = @("dlp.ps1", "dlp.cmd")
+    foreach ($script in $scripts) {
+        $path = Join-Path $Script:Config.WazuhARPath $script
+        if (Test-Path $path) {
+            try {
+                Remove-Item -Path $path -Force -ErrorAction Stop
+                InfoMessage "Removed DLP script: $path"
+            } catch {
+                ErrorMessage "Failed to remove DLP script $path : $_"
+            }
+        }
+    }
+}
+
+# Remove Suricata rules
+function Remove-SuricataRules {
+    PrintStep 5 "Removing Suricata Rules"
+    
+    $rulePath = Join-Path $Script:Config.SuricataRulesDir "suricata-exfiltration.rules"
+    if (Test-Path $rulePath) {
+        try {
+            Remove-Item -Path $rulePath -Force
+            InfoMessage "Removed Suricata rule file: $rulePath"
+        } catch {
+            WarnMessage "Failed to remove Suricata rule file: $_"
+        }
+    }
+
+    if (-Not (Test-Path $Script:Config.SuricataYamlPath)) {
+        InfoMessage "Suricata configuration file not found. Skipping YAML cleanup."
+        return
+    }
+    
+    try {
+        $yamlContent = Get-Content $Script:Config.SuricataYamlPath -Raw
+        $ruleName = "suricata-exfiltration.rules"
+        
+        if ($yamlContent -notmatch [regex]::Escape($ruleName)) {
+            InfoMessage "Suricata exfiltration rules not found in configuration."
+            return
+        }
+        
+        InfoMessage "Using regex fallback for YAML cleanup..."
+
+        $newYamlContent = $yamlContent -replace "(?m)^\s*-\s+$([regex]::Escape($ruleName))\s*\r?\n", ""
+        $newYamlContent | Set-Content $Script:Config.SuricataYamlPath
+
+        SuccessMessage "Removed exfiltration rules from Suricata configuration."
+    } catch {
+        WarnMessage "Failed to update Suricata configuration: $_"
+        WarnMessage "You may need to manually remove 'suricata-exfiltration.rules' from the rule-files section."
+    }
+
+    # Restart Suricata (Scheduled Task)
+    try {
+        $suricataTask = Get-ScheduledTask -TaskName "SuricataStartup" -ErrorAction SilentlyContinue
+        if ($suricataTask) {
+            Stop-ScheduledTask -TaskName "SuricataStartup" -ErrorAction SilentlyContinue
+            Start-ScheduledTask -TaskName "SuricataStartup"
+            SuccessMessage "Restarted Suricata via scheduled task 'SuricataStartup'."
+        }
+    } catch {
+        WarnMessage "Failed to restart Suricata scheduled task: $_"
+    }
+}
+
 # Main function that runs the uninstallation steps
 function Uninstall-Sysmon {
     try {
@@ -195,6 +268,8 @@ function Uninstall-Sysmon {
         Uninstall-SysmonService
         Remove-SysmonInstallation
         Disable-PowerShellLogging
+        Remove-DlpScripts
+        Remove-SuricataRules
         
         SuccessMessage "Sysmon uninstallation completed!"
         if (-not $KeepLogging) {
